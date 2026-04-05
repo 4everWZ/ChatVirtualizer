@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge Chat Virtualizer Options</title>
+    <link rel="stylesheet" href="./options.css" />
+  </head>
+  <body>
+    <main class="options">
+      <h1>Edge Chat Virtualizer Options</h1>
+      <form id="optionsForm">
+        <label>Window size <input id="windowSizeQa" type="number" min="1" /></label>
+        <label>Load batch <input id="loadBatchQa" type="number" min="1" /></label>
+        <label>Top threshold px <input id="topThresholdPx" type="number" min="0" /></label>
+        <label>Preload buffer px <input id="preloadBufferPx" type="number" min="0" /></label>
+        <label>Context before <input id="searchContextBefore" type="number" min="0" /></label>
+        <label>Context after <input id="searchContextAfter" type="number" min="0" /></label>
+        <label>Max cached sessions <input id="maxPersistedSessions" type="number" min="1" /></label>
+        <label>Stability quiet ms <input id="stabilityQuietMs" type="number" min="0" /></label>
+        <label><input id="protectGenerating" type="checkbox" /> Protect generating records</label>
+        <label><input id="enableSearch" type="checkbox" /> Enable search</label>
+        <label><input id="enableVirtualization" type="checkbox" /> Enable virtualization</label>
+        <label><input id="debugLogging" type="checkbox" /> Enable debug logging</label>
+        <div class="actions">
+          <button type="submit">Save</button>
+          <button id="clearCache" type="button">Clear local cache</button>
+        </div>
+      </form>
+      <p id="status"></p>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

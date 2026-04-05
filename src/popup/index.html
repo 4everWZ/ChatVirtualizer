@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Edge Chat Virtualizer</title>
+    <link rel="stylesheet" href="./popup.css" />
+  </head>
+  <body>
+    <main class="popup">
+      <h1>Edge Chat Virtualizer</h1>
+      <label><input id="enableVirtualization" type="checkbox" /> Enable virtualization</label>
+      <label><input id="enableSearch" type="checkbox" /> Enable search</label>
+      <dl class="stats">
+        <div><dt>Session</dt><dd id="sessionId">Unknown</dd></div>
+        <div><dt>Total</dt><dd id="totalRecords">0</dd></div>
+        <div><dt>Mounted</dt><dd id="mountedCount">0</dd></div>
+        <div><dt>Placeholders</dt><dd id="placeholderCount">0</dd></div>
+      </dl>
+      <button id="toggleSearch" type="button">Toggle search overlay</button>
+    </main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,35 @@
+body {
+  margin: 0;
+  background: #e2e8f0;
+  color: #0f172a;
+  font-family: ui-sans-serif, system-ui, sans-serif;
+}
+
+.options {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+form {
+  display: grid;
+  gap: 12px;
+}
+
+label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: white;
+}
+
+input[type='number'] {
+  width: 120px;
+}
+
+.actions {
+  display: flex;
+  gap: 12px;
+}
