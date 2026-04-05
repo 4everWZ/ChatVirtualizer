@@ -8,7 +8,6 @@ export interface ExtensionConfig {
   searchContextBefore: number;
   searchContextAfter: number;
   protectGenerating: boolean;
-  enableSearch: boolean;
   enableVirtualization: boolean;
   debugLogging: boolean;
   maxPersistedSessions: number;
@@ -28,7 +27,6 @@ export interface QARecord {
   mounted: boolean;
   stable: boolean;
   generating: boolean;
-  placeholderId?: string;
   protectedUntil?: number;
   snapshotHtml?: string;
   anchorSignature?: string;
@@ -67,7 +65,7 @@ export interface SessionStats {
   sessionId: string;
   totalRecords: number;
   mountedCount: number;
-  placeholderCount: number;
+  collapsedGroupCount: number;
   adapterConfidence: number;
 }
 

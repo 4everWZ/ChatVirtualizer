@@ -41,5 +41,9 @@ function resolveFixturePath(route) {
     return '/unknown-layout.html';
   }
 
+  if (route === '/chat') {
+    return '/chatgpt-empty.html';
+  }
+
   return route;
 }

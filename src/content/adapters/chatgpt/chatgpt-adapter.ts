@@ -18,6 +18,13 @@ const TURN_SELECTORS = [
 ].join(', ');
 
 const DIRECT_SCROLL_SELECTORS = ['[data-scroll-root]', '[data-ecv-scroll-container]', '[data-testid="conversation-turns"]'].join(', ');
+const LOCATION_CHANGE_EVENT = 'ecv:locationchange';
+const HISTORY_PATCH_STATE_KEY = '__ecvHistoryPatchState__';
+
+interface HistoryPatchState {
+  refCount: number;
+  teardown: () => void;
+}
 
 export class ChatGptPageAdapter implements PageAdapter {
   constructor(private readonly rootDocument: Document = document) {}
@@ -96,22 +103,20 @@ export class ChatGptPageAdapter implements PageAdapter {
 
   observeSessionChanges(callback: () => void): () => void {
     let previousPath = globalThis.location.pathname;
-    const interval = globalThis.setInterval(() => {
+
+    const onLocationChange = () => {
       if (globalThis.location.pathname !== previousPath) {
         previousPath = globalThis.location.pathname;
         callback();
       }
-    }, 500);
-
-    const onPopstate = () => {
-      previousPath = globalThis.location.pathname;
-      callback();
     };
 
-    globalThis.addEventListener('popstate', onPopstate);
+    const releaseHistoryPatch = ensureHistoryChangeEvents();
+    globalThis.addEventListener(LOCATION_CHANGE_EVENT, onLocationChange);
+
     return () => {
-      globalThis.clearInterval(interval);
-      globalThis.removeEventListener('popstate', onPopstate);
+      globalThis.removeEventListener(LOCATION_CHANGE_EVENT, onLocationChange);
+      releaseHistoryPatch();
     };
   }
 
@@ -193,4 +198,66 @@ function isScrollable(element: HTMLElement): boolean {
 
 function containsConversation(element: HTMLElement): boolean {
   return element.querySelector(TURN_SELECTORS) !== null;
+}
+
+function ensureHistoryChangeEvents(): () => void {
+  const state = getHistoryPatchState();
+  if (state) {
+    state.refCount += 1;
+    return () => releaseHistoryPatch();
+  }
+
+  const originalPushState = globalThis.history.pushState.bind(globalThis.history);
+  const originalReplaceState = globalThis.history.replaceState.bind(globalThis.history);
+  const dispatch = () => globalThis.dispatchEvent(new Event(LOCATION_CHANGE_EVENT));
+
+  globalThis.history.pushState = ((...args) => {
+    originalPushState(...args);
+    dispatch();
+  }) as History['pushState'];
+
+  globalThis.history.replaceState = ((...args) => {
+    originalReplaceState(...args);
+    dispatch();
+  }) as History['replaceState'];
+
+  const onPopstate = () => dispatch();
+  const onHashchange = () => dispatch();
+  globalThis.addEventListener('popstate', onPopstate);
+  globalThis.addEventListener('hashchange', onHashchange);
+
+  setHistoryPatchState({
+    refCount: 1,
+    teardown: () => {
+      globalThis.history.pushState = originalPushState;
+      globalThis.history.replaceState = originalReplaceState;
+      globalThis.removeEventListener('popstate', onPopstate);
+      globalThis.removeEventListener('hashchange', onHashchange);
+    }
+  });
+
+  return () => releaseHistoryPatch();
+}
+
+function releaseHistoryPatch(): void {
+  const state = getHistoryPatchState();
+  if (!state) {
+    return;
+  }
+
+  state.refCount -= 1;
+  if (state.refCount > 0) {
+    return;
+  }
+
+  state.teardown();
+  setHistoryPatchState(undefined);
+}
+
+function getHistoryPatchState(): HistoryPatchState | undefined {
+  return (globalThis as typeof globalThis & { [HISTORY_PATCH_STATE_KEY]?: HistoryPatchState })[HISTORY_PATCH_STATE_KEY];
+}
+
+function setHistoryPatchState(state: HistoryPatchState | undefined): void {
+  (globalThis as typeof globalThis & { [HISTORY_PATCH_STATE_KEY]?: HistoryPatchState })[HISTORY_PATCH_STATE_KEY] = state;
 }

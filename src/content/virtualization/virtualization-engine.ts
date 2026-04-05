@@ -1,6 +1,7 @@
 import type { ExtensionConfig, QARecord, RecordSnapshot, SnapshotStore } from '@/shared/contracts';
+import { createCollapsedGroupId } from '@/shared/ids';
 import { Logger } from '@/shared/logger';
-import { createPlaceholderElement } from './placeholders';
+import { createCollapsedGroupElement } from './placeholders';
 import { computeWindowPlan } from './window-manager';
 
 interface VirtualizationEngineOptions {
@@ -9,13 +10,21 @@ interface VirtualizationEngineOptions {
   snapshotStore: SnapshotStore;
 }
 
+interface CollapsedGroupRange {
+  element: HTMLElement;
+  endIndex: number;
+  groupId: string;
+  recordIds: string[];
+  startIndex: number;
+}
+
 export class VirtualizationEngine {
   private readonly config: ExtensionConfig;
   private readonly logger: Logger;
   private readonly snapshotStore: SnapshotStore;
-  private readonly placeholderMap = new Map<string, HTMLElement>();
   private readonly snapshotCache = new Map<string, RecordSnapshot>();
 
+  private collapsedGroups: CollapsedGroupRange[] = [];
   private records: QARecord[] = [];
   private scrollContainer: HTMLElement | null = null;
 
@@ -54,12 +63,16 @@ export class VirtualizationEngine {
         await this.evictRecord(record);
       }
     }
+
+    this.renderCollapsedGroups();
   }
 
   async restoreRange(start: number, end: number): Promise<void> {
     for (const record of this.records.slice(start, end + 1)) {
       await this.restoreRecord(record);
     }
+
+    this.renderCollapsedGroups();
   }
 
   protectRange(start: number, end: number, ttlMs: number): void {
@@ -73,8 +86,8 @@ export class VirtualizationEngine {
     return this.records.filter((record) => record.mounted).length;
   }
 
-  getPlaceholderCount(): number {
-    return this.placeholderMap.size;
+  getCollapsedGroupCount(): number {
+    return this.collapsedGroups.length;
   }
 
   getRecords(): QARecord[] {
@@ -83,8 +96,12 @@ export class VirtualizationEngine {
 
   scrollToRecord(recordId: string): void {
     const record = this.findRecord(recordId);
-    const target = record?.rootElement ?? this.placeholderMap.get(recordId);
-    target?.scrollIntoView({
+    const target = record?.rootElement ?? this.findCollapsedGroupForRecord(recordId)?.element;
+    if (!target || typeof target.scrollIntoView !== 'function') {
+      return;
+    }
+
+    target.scrollIntoView({
       block: 'center',
       behavior: 'smooth'
     });
@@ -92,6 +109,10 @@ export class VirtualizationEngine {
 
   private findRecord(recordId: string): QARecord | undefined {
     return this.records.find((record) => record.id === recordId);
+  }
+
+  private findCollapsedGroupForRecord(recordId: string): CollapsedGroupRange | undefined {
+    return this.collapsedGroups.find((group) => group.recordIds.includes(recordId));
   }
 
   private ensureWrapper(record: QARecord): void {
@@ -128,36 +149,22 @@ export class VirtualizationEngine {
     await this.snapshotStore.putSnapshot(snapshot);
     this.snapshotCache.set(record.id, snapshot);
 
-    const placeholder = createPlaceholderElement({
-      placeholderId: record.placeholderId,
-      recordId: record.id,
-      height: snapshot.height,
-      summary: record.textUser || record.textCombined
-    });
-
-    record.rootElement.replaceWith(placeholder);
+    record.rootElement.remove();
     record.snapshotHtml = snapshot.html;
-    record.placeholderId = placeholder.dataset.placeholderId;
     record.rootElement = null;
     record.mounted = false;
     record.height = snapshot.height;
-    this.placeholderMap.set(record.id, placeholder);
     this.logger.debug('Evicted record', record.id);
   }
 
-  private async restoreRecord(record: QARecord): Promise<void> {
+  private async restoreRecord(record: QARecord): Promise<boolean> {
     if (record.mounted) {
-      return;
-    }
-
-    const placeholder = this.placeholderMap.get(record.id);
-    if (!placeholder?.isConnected) {
-      return;
+      return true;
     }
 
     const snapshot = this.snapshotCache.get(record.id) ?? (await this.snapshotStore.getSnapshot(record.sessionId, record.id));
     if (!snapshot) {
-      return;
+      return false;
     }
 
     const wrapper = document.createElement('div');
@@ -166,14 +173,135 @@ export class VirtualizationEngine {
     wrapper.dataset.recordIndex = `${record.index}`;
     wrapper.innerHTML = snapshot.html;
 
-    placeholder.replaceWith(wrapper);
-    this.placeholderMap.delete(record.id);
+    const reference = this.findNextDomSibling(record.index);
+    if (reference) {
+      reference.before(wrapper);
+    } else {
+      this.getThreadRoot()?.append(wrapper);
+    }
+
     record.rootElement = wrapper;
     record.snapshotHtml = snapshot.html;
     record.mounted = true;
     record.height = wrapper.getBoundingClientRect().height || snapshot.height;
     record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
     this.logger.debug('Restored record', record.id);
+    return true;
+  }
+
+  private renderCollapsedGroups(): void {
+    for (const group of this.collapsedGroups) {
+      group.element.remove();
+    }
+    this.collapsedGroups = [];
+
+    const threadRoot = this.getThreadRoot();
+    if (!threadRoot) {
+      return;
+    }
+
+    let rangeStart: number | null = null;
+
+    for (let index = 0; index <= this.records.length; index += 1) {
+      const record = this.records[index];
+      const isCollapsed = record !== undefined && !record.mounted;
+
+      if (isCollapsed && rangeStart === null) {
+        rangeStart = index;
+      }
+
+      if (rangeStart === null) {
+        continue;
+      }
+
+      if (isCollapsed) {
+        continue;
+      }
+
+      const startIndex = rangeStart;
+      const endIndex = index - 1;
+      const rangeRecords = this.records.slice(startIndex, endIndex + 1);
+      const groupId = createCollapsedGroupId(rangeRecords[0]?.sessionId ?? 'session', startIndex, endIndex);
+
+      const group = createCollapsedGroupElement({
+        groupId,
+        onBeforeMatch: (recordId, reservoir) => {
+          void this.handleBeforeMatch(recordId, reservoir);
+        },
+        records: rangeRecords.map((collapsedRecord) => ({
+          recordId: collapsedRecord.id,
+          summary: collapsedRecord.textUser || collapsedRecord.textCombined,
+          textCombined: collapsedRecord.textCombined
+        }))
+      });
+
+      const reference = this.findNextMountedElement(endIndex);
+      if (reference) {
+        reference.before(group);
+      } else {
+        threadRoot.append(group);
+      }
+
+      this.collapsedGroups.push({
+        element: group,
+        endIndex,
+        groupId,
+        recordIds: rangeRecords.map((collapsedRecord) => collapsedRecord.id),
+        startIndex
+      });
+
+      rangeStart = null;
+    }
+  }
+
+  private async handleBeforeMatch(recordId: string, reservoir: HTMLElement): Promise<void> {
+    const targetIndex = this.records.findIndex((record) => record.id === recordId);
+    if (targetIndex < 0) {
+      return;
+    }
+
+    const start = Math.max(0, targetIndex - this.config.searchContextBefore);
+    const end = Math.min(this.records.length - 1, targetIndex + this.config.searchContextAfter);
+    await this.restoreRange(start, end);
+
+    const restored = this.findRecord(recordId);
+    if (restored?.mounted) {
+      this.scrollToRecord(recordId);
+      return;
+    }
+
+    reservoir.removeAttribute('hidden');
+  }
+
+  private findNextDomSibling(index: number): HTMLElement | null {
+    for (let nextIndex = index + 1; nextIndex < this.records.length; nextIndex += 1) {
+      const mountedRecord = this.records[nextIndex];
+      if (mountedRecord?.rootElement?.isConnected) {
+        return mountedRecord.rootElement;
+      }
+
+      const group = this.collapsedGroups.find((candidate) => candidate.startIndex === nextIndex);
+      if (group?.element.isConnected) {
+        return group.element;
+      }
+    }
+
+    return null;
+  }
+
+  private findNextMountedElement(index: number): HTMLElement | null {
+    for (let nextIndex = index + 1; nextIndex < this.records.length; nextIndex += 1) {
+      const mountedRecord = this.records[nextIndex];
+      if (mountedRecord?.rootElement?.isConnected) {
+        return mountedRecord.rootElement;
+      }
+    }
+
+    return null;
+  }
+
+  private getThreadRoot(): HTMLElement | null {
+    return this.scrollContainer?.querySelector<HTMLElement>('#thread') ?? this.scrollContainer;
   }
 
   private createSnapshot(record: QARecord): RecordSnapshot {

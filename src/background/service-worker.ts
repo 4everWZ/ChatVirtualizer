@@ -7,14 +7,6 @@ const configStore = new ConfigStore();
 const snapshotStore = new IndexedDbSnapshotStore();
 const statsByTab = new Map<number, SessionStats>();
 
-chrome.commands.onCommand.addListener((command) => {
-  if (command !== 'toggle_search_overlay') {
-    return;
-  }
-
-  void toggleSearchOverlayOnActiveTab();
-});
-
 chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   void (async () => {
     switch (message.type) {
@@ -26,10 +18,6 @@ chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendRespo
         break;
       case 'get-active-session-stats':
         sendResponse(await getActiveSessionStats());
-        break;
-      case 'toggle-search-overlay':
-        await toggleSearchOverlayOnActiveTab(message.payload?.forceOpen);
-        sendResponse({ ok: true });
         break;
       case 'get-config':
         sendResponse(await configStore.getConfig());
@@ -56,27 +44,17 @@ async function getActiveSessionStats(): Promise<SessionStats | undefined> {
     return undefined;
   }
 
-  return statsByTab.get(targetTab.id);
-}
-
-async function toggleSearchOverlayOnActiveTab(forceOpen?: boolean): Promise<void> {
-  const targetTab = await getTargetContentTab();
-  if (targetTab?.id === undefined) {
-    return;
+  try {
+    return (await chrome.tabs.sendMessage(targetTab.id, {
+      type: 'get-active-session-stats'
+    } satisfies RuntimeMessage)) as SessionStats | undefined;
+  } catch {
+    return statsByTab.get(targetTab.id);
   }
-
-  await chrome.tabs.sendMessage(targetTab.id, {
-    type: 'toggle-search-overlay',
-    payload: {
-      forceOpen
-    }
-  } satisfies RuntimeMessage);
 }
 
 async function getTargetContentTab(): Promise<chrome.tabs.Tab | undefined> {
-  const tabs = await chrome.tabs.query({
-    currentWindow: true
-  });
+  const tabs = await chrome.tabs.query({});
 
   return (
     tabs.find((tab) => tab.active && isContentTab(tab)) ??
@@ -87,5 +65,17 @@ async function getTargetContentTab(): Promise<chrome.tabs.Tab | undefined> {
 }
 
 function isContentTab(tab: chrome.tabs.Tab): boolean {
-  return Boolean(tab.url?.startsWith('http://') || tab.url?.startsWith('https://'));
+  if (!tab.url) {
+    return false;
+  }
+
+  try {
+    const url = new URL(tab.url);
+    return (
+      (url.protocol === 'https:' && (url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com')) ||
+      (url.protocol === 'http:' && (url.hostname === '127.0.0.1' || url.hostname === 'localhost'))
+    );
+  } catch {
+    return false;
+  }
 }

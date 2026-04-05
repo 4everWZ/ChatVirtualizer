@@ -1,6 +1,6 @@
 # Edge Chat Virtualizer
 
-`Edge Chat Virtualizer` is a Microsoft Edge Manifest V3 extension that reduces ChatGPT long-thread DOM pressure by virtualizing older QA records, restoring them on demand, and searching locally across cached history.
+`Edge Chat Virtualizer` is a Microsoft Edge Manifest V3 extension that reduces ChatGPT long-thread DOM pressure by virtualizing older QA records, restoring them on demand, and keeping collapsed history discoverable through native browser find.
 
 ## Current Scope
 
@@ -13,11 +13,12 @@
 
 - Detect supported ChatGPT chat pages and derive a per-session ID
 - Group DOM turns into logical QA records
-- Keep the latest QA window mounted and replace older records with equal-height placeholders
+- Keep the latest QA window mounted and collapse older records into compact grouped folds
 - Restore older history when the user reaches the top of the chat container
-- Search the current session locally and restore matched context
+- Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
 - Expose popup stats and options for runtime configuration
 - Degrade safely when the page structure is unsupported
+- Stay event-driven end to end; no timer polling, busy waits, or CPU spin loops are allowed in runtime behavior
 
 ## Default Configuration
 
@@ -30,7 +31,6 @@ const DEFAULT_CONFIG = {
   searchContextBefore: 1,
   searchContextAfter: 1,
   protectGenerating: true,
-  enableSearch: true,
   enableVirtualization: true,
   debugLogging: false,
   maxPersistedSessions: 5,
@@ -104,7 +104,7 @@ docs/
   design/                       Architecture notes
 src/
   background/                   MV3 service worker
-  content/                      Adapter, session, virtualization, search, scroll logic
+  content/                      Adapter, session, virtualization, native-find, scroll logic
   options/                      Options page
   popup/                        Popup UI
   shared/                       Typed contracts, config, storage, messaging
@@ -142,6 +142,6 @@ The current repository is wired to verify through:
 ## Known Boundaries
 
 - ChatGPT Web only in the current version
-- Search is current-session only
+- Native browser find support is current-session only
 - Snapshot restore targets reading fidelity, not full site-internal component behavior parity
-- The fixture browser suite verifies popup stats and search/restore behavior; real signed-in ChatGPT validation is still an explicit optional step
+- The fixture browser suite verifies popup stats and native-find restore behavior; real signed-in ChatGPT validation is still an explicit optional step

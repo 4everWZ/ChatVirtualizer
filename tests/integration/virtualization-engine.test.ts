@@ -6,7 +6,7 @@ import { IndexedDbSnapshotStore } from '@/shared/storage/snapshot-store';
 import { installFixtureDom } from '../helpers/fixture-dom';
 
 describe('virtualization engine', () => {
-  test('compresses older records into placeholders and restores them by range', async () => {
+  test('compresses older records into collapsed groups and restores them from native find hooks', async () => {
     installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
 
     const adapter = new ChatGptPageAdapter(document);
@@ -24,12 +24,21 @@ describe('virtualization engine', () => {
     await engine.attach(scrollContainer, records);
     await engine.applyInitialWindow();
 
-    expect(scrollContainer.querySelectorAll('.ecv-placeholder')).toHaveLength(2);
+    expect(scrollContainer.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+    expect(scrollContainer.querySelectorAll('.ecv-placeholder')).toHaveLength(0);
+    expect(scrollContainer.querySelectorAll('[hidden="until-found"][data-record-id]')).toHaveLength(2);
     expect(engine.getMountedCount()).toBe(10);
 
-    await engine.restoreRange(0, 1);
+    const reservoir = scrollContainer.querySelector<HTMLElement>('[hidden="until-found"][data-record-id="local-session:record:0"]');
+    if (!reservoir) {
+      throw new Error('expected a search reservoir for the oldest collapsed record');
+    }
 
-    expect(scrollContainer.querySelectorAll('.ecv-placeholder')).toHaveLength(0);
+    reservoir.dispatchEvent(new Event('beforematch'));
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(scrollContainer.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
     expect(engine.getMountedCount()).toBe(12);
   });
 });

@@ -22,14 +22,6 @@ export default defineManifest({
     default_popup: 'src/popup/index.html'
   },
   options_page: 'src/options/index.html',
-  commands: {
-    toggle_search_overlay: {
-      suggested_key: {
-        default: 'Alt+Shift+F'
-      },
-      description: 'Toggle the in-page search overlay'
-    }
-  },
   content_scripts: [
     {
       matches: [

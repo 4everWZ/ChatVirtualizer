@@ -9,7 +9,6 @@ const fieldIds: Array<keyof ExtensionConfig> = [
   'searchContextBefore',
   'searchContextAfter',
   'protectGenerating',
-  'enableSearch',
   'enableVirtualization',
   'debugLogging',
   'maxPersistedSessions',

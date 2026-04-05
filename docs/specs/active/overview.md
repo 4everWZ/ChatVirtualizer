@@ -2,14 +2,14 @@
 
 ## Summary
 
-This active spec defines the v1 implementation of the Edge Chat Virtualizer as a ChatGPT-only Edge MV3 extension. The implementation goal is to reduce long-thread DOM pressure by keeping only a bounded recent QA window mounted, restoring older history on demand, and searching locally across cached records.
+This active spec defines the v1 implementation of the Edge Chat Virtualizer as a ChatGPT-only Edge MV3 extension. The implementation goal is to reduce long-thread DOM pressure by keeping only a bounded recent QA window mounted, collapsing older history into compact groups, restoring older history on demand, and supporting browser-native find across collapsed records.
 
 ## Scope
 
 - Target site: ChatGPT Web.
-- Runtime shape: content-script-first Edge MV3 extension.
-- Core behaviors: session detection, QA record grouping, virtualization, top-triggered restore, local search, popup/options configuration, and safe degradation.
-- Persistence: local-only configuration in `chrome.storage.local`, record snapshots and search text in IndexedDB.
+- Runtime shape: content-script-first Edge MV3 extension with event-driven activation and session tracking only.
+- Core behaviors: session detection, QA record grouping, virtualization, top-triggered restore, native find restoration, popup/options configuration, and safe degradation.
+- Persistence: local-only configuration in `chrome.storage.local`, record snapshots and searchable text reservoirs in IndexedDB-backed records.
 
 ## Document Set
 
@@ -29,7 +29,6 @@ const DEFAULT_CONFIG = {
   searchContextBefore: 1,
   searchContextAfter: 1,
   protectGenerating: true,
-  enableSearch: true,
   enableVirtualization: true,
   debugLogging: false,
   maxPersistedSessions: 5,
@@ -40,6 +39,6 @@ const DEFAULT_CONFIG = {
 ## Traceability
 
 - Session and page-structure rules live in `page-adapter-and-session.md`.
-- Record grouping, placeholder handling, restore, and scroll compensation live in `record-engine-and-virtualization.md`.
-- Search, persistence, popup/options, and debug surfaces live in `search-storage-and-ui.md`.
+- Record grouping, collapsed-history handling, restore, and scroll compensation live in `record-engine-and-virtualization.md`.
+- Native find support, persistence, popup/options, and debug surfaces live in `search-storage-and-ui.md`.
 - Cross-module assembly and required verification paths live in `integration-and-verification.md`.

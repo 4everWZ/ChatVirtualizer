@@ -10,8 +10,8 @@ describe('runtime message guards', () => {
       type: 'session-stats',
       payload: {
         adapterConfidence: 0.91,
+        collapsedGroupCount: 2,
         mountedCount: 10,
-        placeholderCount: 5,
         sessionId: 'session-1',
         totalRecords: 15
       }

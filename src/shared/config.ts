@@ -8,7 +8,6 @@ export const DEFAULT_CONFIG: ExtensionConfig = {
   searchContextBefore: 1,
   searchContextAfter: 1,
   protectGenerating: true,
-  enableSearch: true,
   enableVirtualization: true,
   debugLogging: false,
   maxPersistedSessions: 5,

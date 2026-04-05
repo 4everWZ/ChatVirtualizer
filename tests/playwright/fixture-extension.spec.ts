@@ -36,7 +36,17 @@ test.describe.serial('extension fixture flows', () => {
   test('virtualizes long threads and restores history after top scroll', async () => {
     const page = await openFixturePage('/c/local-session');
 
-    await expect(page.locator('.ecv-placeholder')).toHaveCount(2);
+    await expect(page.locator('.ecv-collapsed-group')).toHaveCount(1);
+    await expect(page.locator('.ecv-placeholder')).toHaveCount(0);
+
+    const beforeHeight = await page.evaluate(() => {
+      const container = document.querySelector<HTMLElement>('[data-scroll-root], [data-ecv-scroll-container]');
+      if (!container) {
+        throw new Error('missing scroll container');
+      }
+
+      return container.scrollHeight;
+    });
 
     await page.evaluate(() => {
       const container = document.querySelector<HTMLElement>('[data-scroll-root], [data-ecv-scroll-container]');
@@ -50,36 +60,45 @@ test.describe.serial('extension fixture flows', () => {
       container.dispatchEvent(new Event('scroll'));
     });
 
-    await expect(page.locator('.ecv-placeholder')).toHaveCount(0);
+    const afterHeight = await page.evaluate(() => {
+      const container = document.querySelector<HTMLElement>('[data-scroll-root], [data-ecv-scroll-container]');
+      if (!container) {
+        throw new Error('missing scroll container');
+      }
+
+      return container.scrollHeight;
+    });
+
+    expect(afterHeight).toBeGreaterThan(beforeHeight);
+    await expect(page.locator('.ecv-collapsed-group')).toHaveCount(0);
     await page.close();
   });
 
-  test('reads popup stats and restores search hits from the injected overlay', async () => {
+  test('reads popup stats without exposing custom search controls', async () => {
     const page = await openFixturePage('/c/local-session');
-    await expect(page.locator('.ecv-placeholder')).toHaveCount(2);
+    await expect(page.locator('.ecv-collapsed-group')).toHaveCount(1);
 
     const popup = await context.newPage();
     await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
 
     await expect(popup.locator('#mountedCount')).toHaveText('10');
-    await page.evaluate(() => {
-      const host = document.querySelector<HTMLElement>('.ecv-search-overlay-host');
-      if (!host) {
-        throw new Error('missing search overlay host');
-      }
+    await expect(popup.locator('#collapsedGroupCount')).toHaveText('1');
+    await expect(popup.locator('#enableSearch')).toHaveCount(0);
+    await expect(popup.locator('#toggleSearch')).toHaveCount(0);
+    await popup.close();
+    await page.close();
+  });
 
-      host.style.display = 'block';
-    });
+  test('shows no active conversation on blank chat pages', async () => {
+    const page = await openFixturePage('/chat');
+    const popup = await context.newPage();
 
-    const input = page.locator('input[type="search"]');
-    await expect(input).toBeVisible();
-    await input.fill('Question 1');
+    await popup.goto(`chrome-extension://${extensionId}/src/popup/index.html`);
 
-    const result = page.locator('button[data-record-id]').first();
-    await expect(result).toBeVisible();
-    await result.click();
+    await expect(popup.locator('#sessionId')).toHaveText('No active conversation');
+    await expect(popup.locator('#totalRecords')).toHaveText('0');
+    await expect(popup.locator('#collapsedGroupCount')).toHaveText('0');
 
-    await expect(page.locator('.ecv-placeholder')).toHaveCount(0);
     await popup.close();
     await page.close();
   });
@@ -87,7 +106,7 @@ test.describe.serial('extension fixture flows', () => {
   test('degrades safely on unsupported layouts', async () => {
     const page = await openFixturePage('/c/unknown-session');
 
-    await expect(page.locator('.ecv-placeholder')).toHaveCount(0);
+    await expect(page.locator('.ecv-collapsed-group')).toHaveCount(0);
     await expect(page.locator('.ecv-record-root')).toHaveCount(0);
     await page.close();
   });

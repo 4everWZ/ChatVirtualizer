@@ -19,7 +19,7 @@ test('loads the extension on a real ChatGPT conversation', async () => {
     await page.goto(liveUrl!);
     await expect(page.locator('body')).toBeVisible();
     await expect
-      .poll(async () => page.locator('.ecv-record-root, .ecv-placeholder').count())
+      .poll(async () => page.locator('.ecv-record-root, .ecv-collapsed-group').count())
       .toBeGreaterThan(0);
   } finally {
     await context.close();

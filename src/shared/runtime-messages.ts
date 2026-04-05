@@ -5,13 +5,6 @@ export interface SessionStatsMessage {
   payload: SessionStats;
 }
 
-export interface ToggleSearchOverlayMessage {
-  type: 'toggle-search-overlay';
-  payload?: {
-    forceOpen?: boolean;
-  };
-}
-
 export interface GetActiveSessionStatsMessage {
   type: 'get-active-session-stats';
 }
@@ -34,7 +27,6 @@ export type RuntimeMessage =
   | GetActiveSessionStatsMessage
   | GetConfigMessage
   | SessionStatsMessage
-  | ToggleSearchOverlayMessage
   | UpdateConfigMessage;
 
 export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
@@ -47,8 +39,6 @@ export function isRuntimeMessage(value: unknown): value is RuntimeMessage {
   switch (message.type) {
     case 'session-stats':
       return hasSessionStatsPayload(message.payload);
-    case 'toggle-search-overlay':
-      return message.payload === undefined || typeof message.payload === 'object';
     case 'get-active-session-stats':
     case 'get-config':
     case 'clear-snapshot-cache':
@@ -70,7 +60,7 @@ function hasSessionStatsPayload(payload: unknown): payload is SessionStats {
     typeof stats.sessionId === 'string' &&
     typeof stats.totalRecords === 'number' &&
     typeof stats.mountedCount === 'number' &&
-    typeof stats.placeholderCount === 'number' &&
+    typeof stats.collapsedGroupCount === 'number' &&
     typeof stats.adapterConfidence === 'number'
   );
 }

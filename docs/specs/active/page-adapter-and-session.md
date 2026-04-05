@@ -15,6 +15,7 @@ Only ChatGPT is implemented in the current version.
 - Adapter confidence is derived from the presence of a scroll container, multiple turn nodes, and user/assistant role signals.
 - Session identity prefers URL path segments shaped like `/c/<id>`, then falls back to pathname plus title hash for unsupported layouts.
 - The content bootstrap must stay armed on DOM-driven triggers until the supported thread contract appears; an early `document_idle` pass is not sufficient on live ChatGPT because turns can render after the content script starts.
+- Session change detection must be event-driven through DOM mutation and History API hooks; timer polling, dead loops, busy waits, and CPU spin are forbidden.
 - Reindexing is debounced so repeated mutations collapse into a single rebuild window.
 - Any pending restore work is cancelled when the session token changes.
 - Live ChatGPT validation on April 5, 2026 confirmed the current thread container contract:
@@ -40,5 +41,6 @@ Only ChatGPT is implemented in the current version.
 ## Verification
 
 - Fixture-based tests must cover supported chat layouts, malformed layouts, and session-change rebuilds.
+- Adapter tests must assert that session-change observation does not use `setInterval` polling.
 - Live smoke verification must confirm URL-based session detection on a real ChatGPT conversation.
 - Supported fixtures must include a sidebar `nav[aria-label="Chat history"]` alongside a real thread `div[data-scroll-root]` so false-positive container selection is caught in CI.

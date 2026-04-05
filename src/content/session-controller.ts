@@ -1,7 +1,5 @@
 import { ChatGptPageAdapter } from '@/content/adapters/chatgpt/chatgpt-adapter';
 import { buildQaRecordsFromTurns } from '@/content/records/record-engine';
-import { SearchOverlay } from '@/content/search/search-overlay';
-import { searchRecords } from '@/content/search/search-engine';
 import { ScrollManager } from '@/content/scroll/scroll-manager';
 import { VirtualizationEngine } from '@/content/virtualization/virtualization-engine';
 import { getTopRestoreRange } from '@/content/virtualization/window-manager';
@@ -11,8 +9,6 @@ import { Logger } from '@/shared/logger';
 import type { RuntimeMessage } from '@/shared/runtime-messages';
 import { ConfigStore } from '@/shared/storage/config-store';
 import { IndexedDbSnapshotStore } from '@/shared/storage/snapshot-store';
-
-const SEARCH_PROTECTION_TTL_MS = 10_000;
 
 interface SessionControllerOptions {
   adapter?: PageAdapter;
@@ -31,7 +27,6 @@ export class SessionController {
   private activationObserver?: MutationObserver;
   private activationCheckQueued = false;
   private scrollManager?: ScrollManager;
-  private searchOverlay?: SearchOverlay;
   private cleanupSessionObserver?: () => void;
   private currentSessionState?: SessionState;
   private records: QARecord[] = [];
@@ -51,9 +46,6 @@ export class SessionController {
     this.logger = new Logger(this.config.debugLogging);
 
     globalThis.chrome?.runtime?.onMessage.addListener(this.handleRuntimeMessage);
-    window.addEventListener('keydown', this.handleKeydown);
-    window.addEventListener('ecv:toggle-search-overlay', this.handleToggleOverlayEvent as EventListener);
-    window.addEventListener('message', this.handleWindowMessage);
 
     this.cleanupSessionObserver = this.adapter.observeSessionChanges(() => {
       void this.ensureSessionStarted();
@@ -64,9 +56,6 @@ export class SessionController {
 
   stop(): void {
     globalThis.chrome?.runtime?.onMessage.removeListener(this.handleRuntimeMessage);
-    window.removeEventListener('keydown', this.handleKeydown);
-    window.removeEventListener('ecv:toggle-search-overlay', this.handleToggleOverlayEvent as EventListener);
-    window.removeEventListener('message', this.handleWindowMessage);
     this.cleanupSessionObserver?.();
     this.cleanupSessionObserver = undefined;
     this.activationObserver?.disconnect();
@@ -83,24 +72,14 @@ export class SessionController {
     }
   }
 
-  async toggleSearchOverlay(forceOpen?: boolean): Promise<void> {
-    if (!this.config.enableSearch) {
-      return;
-    }
-
-    this.ensureSearchOverlay();
-    this.searchOverlay?.toggle(forceOpen);
-    if (this.searchOverlay?.isVisible()) {
-      this.searchOverlay.setResults([]);
-    }
-  }
-
   getStats() {
+    const isConversationPath = globalThis.location.pathname.includes('/c/');
+
     return {
       adapterConfidence: this.adapter.canHandlePage() ? this.adapter.getConfidence() : 0,
+      collapsedGroupCount: this.virtualizer?.getCollapsedGroupCount() ?? 0,
       mountedCount: this.records.filter((record) => record.mounted).length,
-      placeholderCount: this.records.filter((record) => !record.mounted).length,
-      sessionId: this.currentSessionState?.sessionId ?? this.adapter.getSessionId(),
+      sessionId: this.currentSessionState?.sessionId ?? (isConversationPath ? this.adapter.getSessionId() : 'No active conversation'),
       totalRecords: this.records.length
     };
   }
@@ -169,7 +148,6 @@ export class SessionController {
       onReachTop: () => this.restorePreviousBatch()
     });
 
-    this.ensureSearchOverlay();
     this.observeMutations();
     await this.publishStats();
   }
@@ -219,21 +197,6 @@ export class SessionController {
     });
   }
 
-  private ensureSearchOverlay(): void {
-    if (this.searchOverlay) {
-      return;
-    }
-
-    this.searchOverlay = new SearchOverlay(document.body, {
-      onQueryChange: (query) => {
-        this.searchOverlay?.setResults(searchRecords(this.records, query));
-      },
-      onSelectHit: (hit) => {
-        void this.restoreSearchHit(hit.recordId);
-      }
-    });
-  }
-
   private observeMutations(): void {
     this.mutationObserver?.disconnect();
     if (!this.scrollContainer) {
@@ -258,24 +221,6 @@ export class SessionController {
       childList: true,
       subtree: true
     });
-  }
-
-  private async restoreSearchHit(recordId: string): Promise<void> {
-    if (!this.virtualizer) {
-      return;
-    }
-
-    const targetIndex = this.records.findIndex((record) => record.id === recordId);
-    if (targetIndex < 0) {
-      return;
-    }
-
-    const start = Math.max(0, targetIndex - this.config.searchContextBefore);
-    const end = Math.min(this.records.length - 1, targetIndex + this.config.searchContextAfter);
-    await this.virtualizer.restoreRange(start, end);
-    this.virtualizer.protectRange(start, end, SEARCH_PROTECTION_TTL_MS);
-    this.virtualizer.scrollToRecord(recordId);
-    await this.publishStats();
   }
 
   private async restorePreviousBatch(): Promise<void> {
@@ -307,10 +252,6 @@ export class SessionController {
 
     void (async () => {
       switch (message.type) {
-        case 'toggle-search-overlay':
-          await this.toggleSearchOverlay(message.payload?.forceOpen);
-          sendResponse({ ok: true });
-          break;
         case 'get-active-session-stats':
           sendResponse(this.getStats());
           break;
@@ -320,28 +261,6 @@ export class SessionController {
     })();
 
     return true;
-  };
-
-  private readonly handleKeydown = (event: KeyboardEvent): void => {
-    if (event.altKey && event.shiftKey && event.key.toLowerCase() === 'f') {
-      event.preventDefault();
-      void this.toggleSearchOverlay();
-    }
-  };
-
-  private readonly handleToggleOverlayEvent = (event: CustomEvent<{ forceOpen?: boolean }>): void => {
-    void this.toggleSearchOverlay(event.detail?.forceOpen);
-  };
-
-  private readonly handleWindowMessage = (event: MessageEvent<unknown>): void => {
-    if (event.source !== window || !event.data || typeof event.data !== 'object') {
-      return;
-    }
-
-    const payload = event.data as { forceOpen?: boolean; source?: string; type?: string };
-    if (payload.source === 'edge-chat-virtualizer' && payload.type === 'toggle-search-overlay') {
-      void this.toggleSearchOverlay(payload.forceOpen);
-    }
   };
 
   private async publishStats(): Promise<void> {
