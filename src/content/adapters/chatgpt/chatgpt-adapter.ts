@@ -12,7 +12,7 @@ const LEGACY_TURN_SELECTORS = [
   'div[data-message-author-role]'
 ].join(', ');
 
-const TURN_SELECTORS = [
+export const CHATGPT_TURN_SELECTORS = [
   LIVE_TURN_SELECTORS,
   LEGACY_TURN_SELECTORS
 ].join(', ');
@@ -78,7 +78,7 @@ export class ChatGptPageAdapter implements PageAdapter {
     const candidates: TurnCandidate[] = [];
 
     const searchRoot = scrollContainer.querySelector<HTMLElement>('#thread') ?? scrollContainer;
-    const elements = Array.from(new Set(Array.from(searchRoot.querySelectorAll<HTMLElement>(TURN_SELECTORS))));
+    const elements = collectTurnRootElements(searchRoot);
 
     elements.forEach((element, index) => {
       const role = resolveRole(element);
@@ -150,7 +150,7 @@ export class ChatGptPageAdapter implements PageAdapter {
     }
 
     const searchRoot = scrollContainer.querySelector<HTMLElement>('#thread') ?? scrollContainer;
-    return Array.from(searchRoot.querySelectorAll<HTMLElement>(TURN_SELECTORS)).filter((element) => Boolean(resolveRole(element)));
+    return collectTurnRootElements(searchRoot).filter((element) => Boolean(resolveRole(element)));
   }
 }
 
@@ -197,7 +197,29 @@ function isScrollable(element: HTMLElement): boolean {
 }
 
 function containsConversation(element: HTMLElement): boolean {
-  return element.querySelector(TURN_SELECTORS) !== null;
+  return element.querySelector(CHATGPT_TURN_SELECTORS) !== null;
+}
+
+function collectTurnRootElements(searchRoot: ParentNode): HTMLElement[] {
+  const liveTurns = Array.from(searchRoot.querySelectorAll<HTMLElement>(LIVE_TURN_SELECTORS));
+  if (liveTurns.length > 0) {
+    return liveTurns;
+  }
+
+  return Array.from(searchRoot.querySelectorAll<HTMLElement>(LEGACY_TURN_SELECTORS)).filter(
+    (element) => !hasAncestorMatching(element, LEGACY_TURN_SELECTORS) && !hasAncestorMatching(element, LIVE_TURN_SELECTORS)
+  );
+}
+
+function hasAncestorMatching(element: HTMLElement, selector: string): boolean {
+  let current = element.parentElement;
+  while (current) {
+    if (current.matches(selector)) {
+      return true;
+    }
+    current = current.parentElement;
+  }
+  return false;
 }
 
 function ensureHistoryChangeEvents(): () => void {

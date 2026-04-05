@@ -1,4 +1,4 @@
-import { ChatGptPageAdapter } from '@/content/adapters/chatgpt/chatgpt-adapter';
+import { CHATGPT_TURN_SELECTORS, ChatGptPageAdapter } from '@/content/adapters/chatgpt/chatgpt-adapter';
 import { buildQaRecordsFromTurns } from '@/content/records/record-engine';
 import { ScrollManager } from '@/content/scroll/scroll-manager';
 import { VirtualizationEngine } from '@/content/virtualization/virtualization-engine';
@@ -32,6 +32,7 @@ export class SessionController {
   private records: QARecord[] = [];
   private scrollContainer: HTMLElement | null = null;
   private isApplyingDomChanges = false;
+  private initializationTimer?: number;
   private reindexTimer?: number;
   private virtualizer?: VirtualizationEngine;
 
@@ -56,6 +57,7 @@ export class SessionController {
 
   stop(): void {
     globalThis.chrome?.runtime?.onMessage.removeListener(this.handleRuntimeMessage);
+    void this.virtualizer?.persistCollapsedSnapshots();
     this.cleanupSessionObserver?.();
     this.cleanupSessionObserver = undefined;
     this.activationObserver?.disconnect();
@@ -69,6 +71,11 @@ export class SessionController {
     if (this.reindexTimer !== undefined) {
       clearTimeout(this.reindexTimer);
       this.reindexTimer = undefined;
+    }
+
+    if (this.initializationTimer !== undefined) {
+      clearTimeout(this.initializationTimer);
+      this.initializationTimer = undefined;
     }
   }
 
@@ -86,14 +93,20 @@ export class SessionController {
 
   private async ensureSessionStarted(): Promise<void> {
     if (!this.adapter.canHandlePage()) {
+      this.clearInitializationTimer();
       this.resetSessionState();
       this.armActivationWatcher();
       await this.publishStats();
       return;
     }
 
-    this.disarmActivationWatcher();
-    await this.initializeSession();
+    if (this.currentSessionState?.sessionId === this.adapter.getSessionId()) {
+      this.disarmActivationWatcher();
+      return;
+    }
+
+    this.armActivationWatcher();
+    this.scheduleInitialization();
   }
 
   private async initializeSession(): Promise<void> {
@@ -131,16 +144,13 @@ export class SessionController {
       snapshotStore: this.snapshotStore
     });
 
-    this.isApplyingDomChanges = true;
-    try {
-      await this.virtualizer.attach(scrollContainer, this.records);
+    await this.runWithoutMutationReindex(async () => {
+      await this.virtualizer?.attach(scrollContainer, this.records);
       if (this.config.enableVirtualization) {
-        await this.virtualizer.applyInitialWindow();
+        await this.virtualizer?.applyInitialWindow();
       }
-      this.records = this.virtualizer.getRecords();
-    } finally {
-      this.isApplyingDomChanges = false;
-    }
+      this.records = this.virtualizer?.getRecords() ?? this.records;
+    });
 
     this.scrollManager?.disconnect();
     this.scrollManager = new ScrollManager(scrollContainer, {
@@ -175,6 +185,7 @@ export class SessionController {
   }
 
   private resetSessionState(): void {
+    this.clearInitializationTimer();
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
     this.scrollManager?.disconnect();
@@ -197,14 +208,36 @@ export class SessionController {
     });
   }
 
+  private scheduleInitialization(): void {
+    this.clearInitializationTimer();
+    this.initializationTimer = window.setTimeout(() => {
+      this.initializationTimer = undefined;
+      this.disarmActivationWatcher();
+      void this.initializeSession();
+    }, this.config.stabilityQuietMs);
+  }
+
+  private clearInitializationTimer(): void {
+    if (this.initializationTimer === undefined) {
+      return;
+    }
+
+    clearTimeout(this.initializationTimer);
+    this.initializationTimer = undefined;
+  }
+
   private observeMutations(): void {
     this.mutationObserver?.disconnect();
     if (!this.scrollContainer) {
       return;
     }
 
-    this.mutationObserver = new MutationObserver(() => {
+    this.mutationObserver = new MutationObserver((mutations) => {
       if (this.isApplyingDomChanges) {
+        return;
+      }
+
+      if (!mutations.some((mutation) => isRelevantTurnMutation(mutation))) {
         return;
       }
 
@@ -213,7 +246,7 @@ export class SessionController {
       }
 
       this.reindexTimer = window.setTimeout(() => {
-        void this.initializeSession();
+        void this.reindexSession();
       }, this.config.stabilityQuietMs);
     });
 
@@ -234,11 +267,52 @@ export class SessionController {
     }
 
     const before = this.scrollContainer.scrollHeight;
-    await this.virtualizer.restoreRange(range.start, range.end);
+    await this.runWithoutMutationReindex(async () => {
+      await this.virtualizer?.restoreRange(range.start, range.end);
+    });
     const after = this.scrollContainer.scrollHeight;
     this.scrollContainer.scrollTop += after - before;
     this.currentSessionState.activeWindowStart = range.start;
     await this.publishStats();
+  }
+
+  private async reindexSession(): Promise<void> {
+    const sessionId = this.adapter.getSessionId();
+    if (!this.currentSessionState || !this.virtualizer || this.currentSessionState.sessionId !== sessionId) {
+      await this.initializeSession();
+      return;
+    }
+
+    const partialTurns = this.adapter.collectTurnCandidates();
+    const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
+    const mountedCount = this.records.filter((record) => record.mounted).length;
+
+    if (this.virtualizer.getCollapsedGroupCount() > 0 && partialRecords.length <= mountedCount) {
+      return;
+    }
+
+    if (this.virtualizer.getCollapsedGroupCount() > 0 && this.records.length > 0) {
+      await this.runWithoutMutationReindex(async () => {
+        await this.virtualizer?.restoreRange(0, this.records.length - 1);
+        this.records = this.virtualizer?.getRecords() ?? this.records;
+      });
+    }
+
+    await this.initializeSession();
+  }
+
+  private async runWithoutMutationReindex(work: () => Promise<void>): Promise<void> {
+    this.mutationObserver?.disconnect();
+    this.isApplyingDomChanges = true;
+
+    try {
+      await work();
+    } finally {
+      this.isApplyingDomChanges = false;
+      if (this.scrollContainer) {
+        this.observeMutations();
+      }
+    }
   }
 
   private readonly handleRuntimeMessage = (
@@ -273,4 +347,18 @@ export class SessionController {
       // Ignore when no background worker is connected.
     }
   }
+}
+
+function isRelevantTurnMutation(mutation: MutationRecord): boolean {
+  return hasRelevantTurnNode(mutation.addedNodes) || hasRelevantTurnNode(mutation.removedNodes);
+}
+
+function hasRelevantTurnNode(nodes: NodeList): boolean {
+  return Array.from(nodes).some((node) => {
+    if (!(node instanceof HTMLElement)) {
+      return false;
+    }
+
+    return node.matches(CHATGPT_TURN_SELECTORS) || node.querySelector(CHATGPT_TURN_SELECTORS) !== null;
+  });
 }

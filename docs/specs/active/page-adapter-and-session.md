@@ -23,6 +23,7 @@ Only ChatGPT is implemented in the current version.
   - turn root: `section[data-testid^="conversation-turn-"][data-turn][data-turn-id]`
   - role signal: `data-turn="user" | "assistant"`
   - accessibility label fallback: `h4.sr-only` with `You said:` or `ChatGPT said:`
+- When live `section[data-testid^="conversation-turn-"][data-turn]` roots are present, the adapter must ignore nested `[data-message-author-role]` descendants. Real ChatGPT duplicates user and assistant content inside those descendants, and treating both layers as turn roots doubles record counts and destabilizes virtualization.
 - `nav[aria-label="Chat history"]` is the left sidebar history list, not the conversation scroll root, and must not be used for virtualization.
 
 ## Code Mapping
@@ -42,5 +43,6 @@ Only ChatGPT is implemented in the current version.
 
 - Fixture-based tests must cover supported chat layouts, malformed layouts, and session-change rebuilds.
 - Adapter tests must assert that session-change observation does not use `setInterval` polling.
+- Adapter tests must assert that live outer turn sections win over nested author-role descendants when both exist in the DOM.
 - Live smoke verification must confirm URL-based session detection on a real ChatGPT conversation.
 - Supported fixtures must include a sidebar `nav[aria-label="Chat history"]` alongside a real thread `div[data-scroll-root]` so false-positive container selection is caught in CI.

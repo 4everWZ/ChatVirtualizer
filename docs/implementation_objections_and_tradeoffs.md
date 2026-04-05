@@ -11,3 +11,7 @@
 - **Original Spec/Idea:** Popup stats would rely on content-script updates cached in the MV3 background worker.
 - **Actual Implementation:** Popup stats query the active content tab directly and use background state only as a fallback.
 - **Reasoning:** MV3 service workers suspend aggressively, so direct content-tab queries keep popup state accurate after cache loss.
+
+- **Original Spec/Idea:** Collapsed records would be serialized into sanitized IndexedDB snapshots as part of the live-page initial virtualization pass.
+- **Actual Implementation:** Initial virtualization keeps collapsed records as detached DOM roots for same-session restore and only attempts sanitized snapshot persistence as a best-effort stop-time path.
+- **Reasoning:** Real ChatGPT A/B verification on April 6, 2026 showed that eager hot-path snapshot generation materially regressed live conversation load time, while detached in-memory restore preserved the user-visible restore path without that startup penalty.

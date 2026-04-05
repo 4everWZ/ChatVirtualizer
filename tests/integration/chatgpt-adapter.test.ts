@@ -28,4 +28,34 @@ describe('chatgpt page adapter', () => {
     expect(adapter.canHandlePage()).toBe(false);
     expect(adapter.collectTurnCandidates()).toHaveLength(0);
   });
+
+  test('prefers outer live turn sections over nested author-role nodes on real ChatGPT layouts', () => {
+    document.body.innerHTML = `
+      <div data-scroll-root style="height: 800px; overflow-y: auto;">
+        <main id="main">
+          <div id="thread">
+            <section data-testid="conversation-turn-1" data-turn-id="turn-1" data-turn="user">
+              <div data-message-author-role="user">Question 1</div>
+            </section>
+            <section data-testid="conversation-turn-2" data-turn-id="turn-2" data-turn="assistant">
+              <div data-message-author-role="assistant">Answer 1</div>
+            </section>
+            <section data-testid="conversation-turn-3" data-turn-id="turn-3" data-turn="user">
+              <div data-message-author-role="user">Question 2</div>
+            </section>
+            <section data-testid="conversation-turn-4" data-turn-id="turn-4" data-turn="assistant">
+              <div data-message-author-role="assistant">Answer 2</div>
+            </section>
+          </div>
+        </main>
+      </div>
+    `;
+
+    const adapter = new ChatGptPageAdapter(document);
+    const turns = adapter.collectTurnCandidates();
+
+    expect(turns).toHaveLength(4);
+    expect(turns.map((turn) => turn.id)).toEqual(['turn-1', 'turn-2', 'turn-3', 'turn-4']);
+    expect(turns.map((turn) => turn.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+  });
 });

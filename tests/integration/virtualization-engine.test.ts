@@ -71,6 +71,70 @@ describe('virtualization engine', () => {
     snapshotStore.flush();
     await applyPromise;
   });
+
+  test('does not synchronously serialize evicted record html during initial collapse', async () => {
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore: new IndexedDbSnapshotStore('ecv-virtualizer-html-test')
+    });
+
+    await engine.attach(scrollContainer, records);
+
+    let innerHtmlReads = 0;
+    for (const record of records.slice(0, 2)) {
+      if (!record.rootElement) {
+        throw new Error('expected attached records to have wrappers before collapse');
+      }
+
+      const originalInnerHtml = record.rootElement.innerHTML;
+      Object.defineProperty(record.rootElement, 'innerHTML', {
+        configurable: true,
+        get() {
+          innerHtmlReads += 1;
+          return originalInnerHtml;
+        }
+      });
+    }
+
+    await engine.applyInitialWindow();
+
+    expect(innerHtmlReads).toBe(0);
+  });
+
+  test('does not force synchronous layout reads during initial attach and collapse', async () => {
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect');
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore: new IndexedDbSnapshotStore('ecv-virtualizer-layout-test')
+    });
+
+    try {
+      await engine.attach(scrollContainer, records);
+      await engine.applyInitialWindow();
+
+      expect(rectSpy).not.toHaveBeenCalled();
+    } finally {
+      rectSpy.mockRestore();
+    }
+  });
 });
 
 class SlowSnapshotStore implements SnapshotStore {

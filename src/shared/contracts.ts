@@ -32,6 +32,7 @@ export interface QARecord {
   anchorSignature?: string;
   elements?: HTMLElement[];
   rootElement?: HTMLElement | null;
+  detachedRoot?: HTMLElement | null;
 }
 
 export interface SessionState {

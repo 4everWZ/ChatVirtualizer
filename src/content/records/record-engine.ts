@@ -23,7 +23,7 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
         textUser: normalizeText(turn.text),
         textAssistant: '',
         textCombined: normalizeText(turn.text),
-        height: measureElements([turn.element]),
+        height: estimateHeight([turn.element]),
         mounted: true,
         stable: false,
         generating: Boolean(turn.generating),
@@ -59,7 +59,7 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
     current.textCombined = joinText(current.textCombined, turn.text);
     current.generating = current.generating || Boolean(turn.generating);
     current.elements?.push(turn.element);
-    current.height = measureElements(current.elements ?? []);
+    current.height = estimateHeight(current.elements ?? []);
     current.anchorSignature = current.anchorSignature || createAnchorSignature(current.textCombined);
   }
 
@@ -77,7 +77,7 @@ function finalizeRecord(record: QARecord): void {
   record.textAssistant = normalizeText(record.textAssistant);
   record.textCombined = normalizeText(joinText(record.textUser, record.textAssistant));
   record.anchorSignature = record.anchorSignature || createAnchorSignature(record.textCombined);
-  record.height = measureElements(record.elements ?? []);
+  record.height = estimateHeight(record.elements ?? []);
 }
 
 function normalizeText(value: string): string {
@@ -88,9 +88,12 @@ function joinText(left: string, right: string): string {
   return [left, normalizeText(right)].filter(Boolean).join(' ').trim();
 }
 
-function measureElements(elements: HTMLElement[]): number {
-  const measured = elements.reduce((total, element) => total + element.getBoundingClientRect().height, 0);
-  return measured || elements.length * 120;
+function estimateHeight(elements: HTMLElement[]): number {
+  if (elements.length === 0) {
+    return 0;
+  }
+
+  return elements.length * 120;
 }
 
 function createAnchorSignature(text: string): string {

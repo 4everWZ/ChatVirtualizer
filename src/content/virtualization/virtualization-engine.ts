@@ -126,6 +126,14 @@ export class VirtualizationEngine {
       return;
     }
 
+    const existingWrapper = findSharedRecordWrapper(connectedElements);
+    if (existingWrapper) {
+      record.rootElement = existingWrapper;
+      record.mounted = true;
+      record.elements = Array.from(existingWrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      return;
+    }
+
     const wrapper = document.createElement('div');
     wrapper.className = 'ecv-record-root';
     wrapper.dataset.recordId = record.id;
@@ -137,7 +145,6 @@ export class VirtualizationEngine {
     }
 
     record.rootElement = wrapper;
-    record.height = wrapper.getBoundingClientRect().height || record.height;
     record.mounted = true;
   }
 
@@ -146,20 +153,33 @@ export class VirtualizationEngine {
       return;
     }
 
-    const snapshot = this.createSnapshot(record);
-    this.snapshotCache.set(record.id, snapshot);
-    this.queueSnapshotPersist(snapshot);
-
-    record.rootElement.remove();
-    record.snapshotHtml = snapshot.html;
+    const detachedRoot = record.rootElement;
+    detachedRoot.remove();
+    record.detachedRoot = detachedRoot;
     record.rootElement = null;
     record.mounted = false;
-    record.height = snapshot.height;
     this.logger.debug('Evicted record', record.id);
   }
 
   private async restoreRecord(record: QARecord): Promise<boolean> {
     if (record.mounted) {
+      return true;
+    }
+
+    if (record.detachedRoot) {
+      const wrapper = record.detachedRoot;
+      const reference = this.findNextDomSibling(record.index);
+      if (reference) {
+        reference.before(wrapper);
+      } else {
+        this.getThreadRoot()?.append(wrapper);
+      }
+
+      record.detachedRoot = null;
+      record.rootElement = wrapper;
+      record.mounted = true;
+      record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      this.logger.debug('Restored record from detached DOM', record.id);
       return true;
     }
 
@@ -184,7 +204,7 @@ export class VirtualizationEngine {
     record.rootElement = wrapper;
     record.snapshotHtml = snapshot.html;
     record.mounted = true;
-    record.height = wrapper.getBoundingClientRect().height || snapshot.height;
+    record.height = snapshot.height;
     record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
     this.logger.debug('Restored record', record.id);
     return true;
@@ -305,13 +325,12 @@ export class VirtualizationEngine {
     return this.scrollContainer?.querySelector<HTMLElement>('#thread') ?? this.scrollContainer;
   }
 
-  private createSnapshot(record: QARecord): RecordSnapshot {
-    if (!record.rootElement) {
+  private createSnapshot(record: QARecord, sourceRoot: HTMLElement | null): RecordSnapshot {
+    if (!sourceRoot) {
       throw new Error(`Record ${record.id} is missing a root element`);
     }
 
-    const sanitizedHtml = sanitizeHtml(record.rootElement.innerHTML);
-    const height = record.rootElement.getBoundingClientRect().height || record.height;
+    const sanitizedHtml = sanitizeHtml(sourceRoot.innerHTML);
     const now = Date.now();
 
     return {
@@ -319,7 +338,7 @@ export class VirtualizationEngine {
       recordId: record.id,
       html: sanitizedHtml,
       textCombined: record.textCombined,
-      height,
+      height: record.height,
       anchorSignature: record.anchorSignature ?? record.textCombined.slice(0, 80),
       createdAt: now,
       updatedAt: now
@@ -341,6 +360,20 @@ export class VirtualizationEngine {
 
     this.pendingSnapshotWrites.set(writeKey, writePromise);
   }
+
+  async persistCollapsedSnapshots(): Promise<void> {
+    for (const record of this.records) {
+      if (!record.detachedRoot || record.mounted || this.snapshotCache.has(record.id)) {
+        continue;
+      }
+
+      const snapshot = this.createSnapshot(record, record.detachedRoot);
+      this.snapshotCache.set(record.id, snapshot);
+      record.snapshotHtml = snapshot.html;
+      this.queueSnapshotPersist(snapshot);
+      record.detachedRoot = null;
+    }
+  }
 }
 
 function sanitizeHtml(html: string): string {
@@ -350,4 +383,14 @@ function sanitizeHtml(html: string): string {
     template.content.querySelectorAll(selector).forEach((node) => node.remove());
   }
   return template.innerHTML;
+}
+
+function findSharedRecordWrapper(elements: HTMLElement[]): HTMLElement | null {
+  const [firstElement] = elements;
+  const parent = firstElement?.parentElement;
+  if (!(parent instanceof HTMLElement) || !parent.classList.contains('ecv-record-root')) {
+    return null;
+  }
+
+  return elements.every((element) => element.parentElement === parent) ? parent : null;
 }

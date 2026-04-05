@@ -11,9 +11,11 @@ The system is assembled around a session controller that coordinates adapter dis
 - Runtime control flow must stay event-driven end to end. Timer polling, dead loops, busy waits, and long-running CPU spin used only to simplify implementation are forbidden.
 - Session rebuilds are atomic from the content script’s perspective: cancel pending work, rebuild records, re-evaluate the mounted window, then publish stats.
 - Initial history collapse must not synchronously wait for slow IndexedDB persistence before removing eligible old records from the live DOM.
+- Initial history collapse must not force synchronous layout reads or eager HTML snapshot generation on the live-page hot path.
 - Background, popup, and options communicate only through typed runtime messages.
 - Popup stats must query the active content tab first and use background state only as a fallback when MV3 worker suspension has dropped cached state.
 - Storage access is asynchronous and must never block DOM mutation handling on the hot path.
+- Live ChatGPT adapter logic must prefer outer `section[data-testid^="conversation-turn-"][data-turn]` roots over nested `[data-message-author-role]` descendants so real message DOM is not double-counted.
 
 ## Verification Plan
 
@@ -23,6 +25,7 @@ The system is assembled around a session controller that coordinates adapter dis
 - `pnpm test:playwright`
 - Optional live smoke: `pnpm test:live` with a signed-in browser profile.
 - Session bootstrap and session-change tests must assert that no `setInterval` polling is introduced.
+- Real-page A/B debugging must compare the same conversation with the extension disabled and enabled before performance claims are treated as fixed.
 - When real ChatGPT DOM contracts change, update the fixture pages to mirror the validated shape before treating the adapter as current.
 
 ## Acceptance Mapping
