@@ -22,6 +22,7 @@ export class VirtualizationEngine {
   private readonly config: ExtensionConfig;
   private readonly logger: Logger;
   private readonly snapshotStore: SnapshotStore;
+  private readonly pendingSnapshotWrites = new Map<string, Promise<void>>();
   private readonly snapshotCache = new Map<string, RecordSnapshot>();
 
   private collapsedGroups: CollapsedGroupRange[] = [];
@@ -146,8 +147,8 @@ export class VirtualizationEngine {
     }
 
     const snapshot = this.createSnapshot(record);
-    await this.snapshotStore.putSnapshot(snapshot);
     this.snapshotCache.set(record.id, snapshot);
+    this.queueSnapshotPersist(snapshot);
 
     record.rootElement.remove();
     record.snapshotHtml = snapshot.html;
@@ -323,6 +324,22 @@ export class VirtualizationEngine {
       createdAt: now,
       updatedAt: now
     };
+  }
+
+  private queueSnapshotPersist(snapshot: RecordSnapshot): void {
+    const writeKey = `${snapshot.sessionId}:${snapshot.recordId}`;
+    const writePromise = this.snapshotStore
+      .putSnapshot(snapshot)
+      .catch((error) => {
+        this.logger.warn('Failed to persist snapshot', writeKey, error);
+      })
+      .finally(() => {
+        if (this.pendingSnapshotWrites.get(writeKey) === writePromise) {
+          this.pendingSnapshotWrites.delete(writeKey);
+        }
+      });
+
+    this.pendingSnapshotWrites.set(writeKey, writePromise);
   }
 }
 

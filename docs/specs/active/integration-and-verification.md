@@ -10,6 +10,7 @@ The system is assembled around a session controller that coordinates adapter dis
 - If the adapter is not yet confident because live ChatGPT has not rendered turns, the content bootstrap must stay armed with a DOM-triggered activation watcher and retry instead of permanently exiting.
 - Runtime control flow must stay event-driven end to end. Timer polling, dead loops, busy waits, and long-running CPU spin used only to simplify implementation are forbidden.
 - Session rebuilds are atomic from the content script’s perspective: cancel pending work, rebuild records, re-evaluate the mounted window, then publish stats.
+- Initial history collapse must not synchronously wait for slow IndexedDB persistence before removing eligible old records from the live DOM.
 - Background, popup, and options communicate only through typed runtime messages.
 - Popup stats must query the active content tab first and use background state only as a fallback when MV3 worker suspension has dropped cached state.
 - Storage access is asynchronous and must never block DOM mutation handling on the hot path.

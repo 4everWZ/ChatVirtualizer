@@ -16,6 +16,7 @@ Cross-session search is not implemented in the current version.
 - Native `beforematch` on a reservoir restores the matched record plus `searchContextBefore` and `searchContextAfter`.
 - If restore cannot remount the record during `beforematch`, the reservoir is revealed in plain text so browser-native find still lands on a valid node.
 - Snapshot persistence uses per-session buckets with LRU eviction across sessions capped by `maxPersistedSessions`.
+- Popup config is read directly from `chrome.storage.local` so the popup still renders even if the MV3 background worker is temporarily unavailable.
 - Popup stats query the active content tab directly on open and fall back to background-cached stats only when the content script is not reachable.
 
 ## Code Mapping

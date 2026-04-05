@@ -1,26 +1,25 @@
+import { DEFAULT_CONFIG } from '@/shared/config';
 import type { ExtensionConfig, SessionStats } from '@/shared/contracts';
 import type { RuntimeMessage } from '@/shared/runtime-messages';
+import { ConfigStore } from '@/shared/storage/config-store';
 
 const enableVirtualization = document.querySelector<HTMLInputElement>('#enableVirtualization');
 const sessionId = document.querySelector<HTMLElement>('#sessionId');
 const totalRecords = document.querySelector<HTMLElement>('#totalRecords');
 const mountedCount = document.querySelector<HTMLElement>('#mountedCount');
 const collapsedGroupCount = document.querySelector<HTMLElement>('#collapsedGroupCount');
+const configStore = new ConfigStore();
 
 void initialize();
 
 async function initialize(): Promise<void> {
-  const [config, stats] = await Promise.all([getConfig(), getStats()]);
+  applyConfig(DEFAULT_CONFIG);
+  renderStats(undefined);
 
-  if (enableVirtualization) {
-    enableVirtualization.checked = config.enableVirtualization;
-    enableVirtualization.addEventListener('change', () => {
-      void updateConfig({
-        enableVirtualization: enableVirtualization.checked
-      });
-    });
-  }
+  const config = await getConfigSafe();
+  applyConfig(config);
 
+  const stats = await getStatsSafe();
   renderStats(stats);
 }
 
@@ -39,10 +38,40 @@ function renderStats(stats?: SessionStats): void {
   }
 }
 
-async function getConfig(): Promise<ExtensionConfig> {
-  return chrome.runtime.sendMessage({
-    type: 'get-config'
-  } satisfies RuntimeMessage);
+function applyConfig(config: ExtensionConfig): void {
+  if (!enableVirtualization) {
+    return;
+  }
+
+  enableVirtualization.checked = config.enableVirtualization;
+  if (enableVirtualization.dataset.bound === 'true') {
+    return;
+  }
+
+  enableVirtualization.dataset.bound = 'true';
+  enableVirtualization.addEventListener('change', () => {
+    void updateConfig({
+      enableVirtualization: enableVirtualization.checked
+    });
+  });
+}
+
+async function getConfigSafe(): Promise<ExtensionConfig> {
+  try {
+    return await configStore.getConfig();
+  } catch (error) {
+    console.warn('[ECV] Failed to load popup config from storage.', error);
+    return DEFAULT_CONFIG;
+  }
+}
+
+async function getStatsSafe(): Promise<SessionStats | undefined> {
+  try {
+    return await getStats();
+  } catch (error) {
+    console.warn('[ECV] Failed to load popup stats.', error);
+    return undefined;
+  }
 }
 
 async function getStats(): Promise<SessionStats | undefined> {
@@ -70,10 +99,13 @@ async function getStats(): Promise<SessionStats | undefined> {
 }
 
 async function updateConfig(partial: Partial<ExtensionConfig>): Promise<void> {
-  await chrome.runtime.sendMessage({
-    type: 'update-config',
-    payload: partial
-  } satisfies RuntimeMessage);
+  try {
+    const next = await configStore.updateConfig(partial);
+    applyConfig(next);
+  } catch (error) {
+    console.warn('[ECV] Failed to persist popup config.', error);
+    applyConfig(await getConfigSafe());
+  }
 }
 
 function isContentTab(tab: chrome.tabs.Tab): boolean {
