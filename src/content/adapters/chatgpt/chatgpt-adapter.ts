@@ -1,17 +1,23 @@
 import type { PageAdapter, TurnCandidate, TurnRole } from '@/shared/contracts';
 
-const TURN_SELECTORS = [
+const LIVE_TURN_SELECTORS = [
+  'section[data-testid^="conversation-turn-"][data-turn][data-turn-id]',
+  'section[data-testid^="conversation-turn-"][data-turn]'
+].join(', ');
+
+const LEGACY_TURN_SELECTORS = [
   '[data-turn-root]',
   '[data-message-author-role]',
   'article[data-message-author-role]',
   'div[data-message-author-role]'
 ].join(', ');
 
-const SCROLL_SELECTORS = [
-  '[data-ecv-scroll-container]',
-  '[aria-label="Chat history"]',
-  '[data-testid="conversation-turns"]'
+const TURN_SELECTORS = [
+  LIVE_TURN_SELECTORS,
+  LEGACY_TURN_SELECTORS
 ].join(', ');
+
+const DIRECT_SCROLL_SELECTORS = ['[data-scroll-root]', '[data-ecv-scroll-container]', '[data-testid="conversation-turns"]'].join(', ');
 
 export class ChatGptPageAdapter implements PageAdapter {
   constructor(private readonly rootDocument: Document = document) {}
@@ -30,18 +36,30 @@ export class ChatGptPageAdapter implements PageAdapter {
   }
 
   getScrollContainer(): HTMLElement | null {
-    const direct = this.rootDocument.querySelector<HTMLElement>(SCROLL_SELECTORS);
-    if (direct) {
-      return direct;
+    const threadRoot = this.rootDocument.querySelector<HTMLElement>('#thread');
+    const main = this.rootDocument.querySelector<HTMLElement>('main#main, main');
+    const firstTurn = this.rootDocument.querySelector<HTMLElement>(LIVE_TURN_SELECTORS);
+
+    for (const anchor of [firstTurn, threadRoot, main]) {
+      const container = anchor?.closest<HTMLElement>('[data-scroll-root]');
+      if (container) {
+        return container;
+      }
     }
 
-    const main = this.rootDocument.querySelector('main');
+    const directCandidates = Array.from(this.rootDocument.querySelectorAll<HTMLElement>(DIRECT_SCROLL_SELECTORS));
+    for (const candidate of directCandidates) {
+      if (containsConversation(candidate)) {
+        return candidate;
+      }
+    }
+
     if (!main) {
       return null;
     }
 
-    const candidates = Array.from(main.querySelectorAll<HTMLElement>('section, div'));
-    return candidates.find((candidate) => isScrollable(candidate)) ?? null;
+    const candidates = [main, ...Array.from(main.querySelectorAll<HTMLElement>('section, div'))];
+    return candidates.find((candidate) => isScrollable(candidate) && containsConversation(candidate)) ?? null;
   }
 
   collectTurnCandidates(): TurnCandidate[] {
@@ -52,7 +70,10 @@ export class ChatGptPageAdapter implements PageAdapter {
 
     const candidates: TurnCandidate[] = [];
 
-    Array.from(scrollContainer.querySelectorAll<HTMLElement>(TURN_SELECTORS)).forEach((element, index) => {
+    const searchRoot = scrollContainer.querySelector<HTMLElement>('#thread') ?? scrollContainer;
+    const elements = Array.from(new Set(Array.from(searchRoot.querySelectorAll<HTMLElement>(TURN_SELECTORS))));
+
+    elements.forEach((element, index) => {
       const role = resolveRole(element);
       if (!role) {
         return;
@@ -63,7 +84,10 @@ export class ChatGptPageAdapter implements PageAdapter {
         role,
         text: element.textContent?.trim() ?? '',
         element,
-        generating: element.dataset.generating === 'true' || element.getAttribute('aria-busy') === 'true'
+        generating:
+          element.dataset.generating === 'true' ||
+          element.getAttribute('aria-busy') === 'true' ||
+          element.querySelector('[data-writing-block], [aria-busy="true"]') !== null
       });
     });
 
@@ -97,11 +121,15 @@ export class ChatGptPageAdapter implements PageAdapter {
     let confidence = 0;
 
     if (scrollContainer) {
-      confidence += 0.5;
+      confidence += 0.4;
     }
 
     if (turnCount >= 2) {
       confidence += 0.4;
+    }
+
+    if (this.rootDocument.querySelector('main#main, #thread')) {
+      confidence += 0.1;
     }
 
     if (globalThis.location.pathname.includes('/c/')) {
@@ -116,11 +144,17 @@ export class ChatGptPageAdapter implements PageAdapter {
       return [];
     }
 
-    return Array.from(scrollContainer.querySelectorAll<HTMLElement>(TURN_SELECTORS)).filter((element) => Boolean(resolveRole(element)));
+    const searchRoot = scrollContainer.querySelector<HTMLElement>('#thread') ?? scrollContainer;
+    return Array.from(searchRoot.querySelectorAll<HTMLElement>(TURN_SELECTORS)).filter((element) => Boolean(resolveRole(element)));
   }
 }
 
 function resolveRole(element: HTMLElement): TurnRole | null {
+  const turnRole = element.dataset.turn;
+  if (turnRole === 'user' || turnRole === 'assistant' || turnRole === 'tool') {
+    return turnRole;
+  }
+
   const authorRole = element.dataset.messageAuthorRole;
   if (authorRole === 'user' || authorRole === 'assistant') {
     return authorRole;
@@ -141,10 +175,22 @@ function resolveRole(element: HTMLElement): TurnRole | null {
     return 'user';
   }
 
+  const headingLabel = element.querySelector('h4, h5, h6')?.textContent?.toLowerCase() ?? '';
+  if (headingLabel.includes('chatgpt said')) {
+    return 'assistant';
+  }
+  if (headingLabel.includes('you said')) {
+    return 'user';
+  }
+
   return null;
 }
 
 function isScrollable(element: HTMLElement): boolean {
   const style = globalThis.getComputedStyle(element);
   return style.overflowY === 'auto' || style.overflowY === 'scroll';
+}
+
+function containsConversation(element: HTMLElement): boolean {
+  return element.querySelector(TURN_SELECTORS) !== null;
 }

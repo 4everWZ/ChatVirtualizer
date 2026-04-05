@@ -28,6 +28,8 @@ export class SessionController {
   private config: ExtensionConfig = DEFAULT_CONFIG;
   private logger = new Logger(false);
   private mutationObserver?: MutationObserver;
+  private activationObserver?: MutationObserver;
+  private activationCheckQueued = false;
   private scrollManager?: ScrollManager;
   private searchOverlay?: SearchOverlay;
   private cleanupSessionObserver?: () => void;
@@ -48,29 +50,28 @@ export class SessionController {
     this.config = mergeConfig(await this.configStore.getConfig());
     this.logger = new Logger(this.config.debugLogging);
 
-    if (!this.adapter.canHandlePage()) {
-      await this.publishStats();
-      return;
-    }
-
-    await this.initializeSession();
-    this.cleanupSessionObserver = this.adapter.observeSessionChanges(() => {
-      void this.initializeSession();
-    });
-
-    chrome.runtime?.onMessage.addListener(this.handleRuntimeMessage);
+    globalThis.chrome?.runtime?.onMessage.addListener(this.handleRuntimeMessage);
     window.addEventListener('keydown', this.handleKeydown);
     window.addEventListener('ecv:toggle-search-overlay', this.handleToggleOverlayEvent as EventListener);
     window.addEventListener('message', this.handleWindowMessage);
+
+    this.cleanupSessionObserver = this.adapter.observeSessionChanges(() => {
+      void this.ensureSessionStarted();
+    });
+
+    await this.ensureSessionStarted();
   }
 
   stop(): void {
-    chrome.runtime?.onMessage.removeListener(this.handleRuntimeMessage);
+    globalThis.chrome?.runtime?.onMessage.removeListener(this.handleRuntimeMessage);
     window.removeEventListener('keydown', this.handleKeydown);
     window.removeEventListener('ecv:toggle-search-overlay', this.handleToggleOverlayEvent as EventListener);
     window.removeEventListener('message', this.handleWindowMessage);
     this.cleanupSessionObserver?.();
     this.cleanupSessionObserver = undefined;
+    this.activationObserver?.disconnect();
+    this.activationObserver = undefined;
+    this.activationCheckQueued = false;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
     this.mutationObserver?.disconnect();
@@ -104,15 +105,36 @@ export class SessionController {
     };
   }
 
+  private async ensureSessionStarted(): Promise<void> {
+    if (!this.adapter.canHandlePage()) {
+      this.resetSessionState();
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
+    this.disarmActivationWatcher();
+    await this.initializeSession();
+  }
+
   private async initializeSession(): Promise<void> {
     const sessionId = this.adapter.getSessionId();
     const scrollContainer = this.adapter.getScrollContainer();
     if (!scrollContainer) {
+      this.armActivationWatcher();
+      await this.publishStats();
       return;
     }
 
     this.scrollContainer = scrollContainer;
     const turns = this.adapter.collectTurnCandidates();
+    if (turns.length === 0) {
+      this.resetSessionState();
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
     this.records = buildQaRecordsFromTurns(turns, sessionId);
 
     this.currentSessionState = {
@@ -150,6 +172,51 @@ export class SessionController {
     this.ensureSearchOverlay();
     this.observeMutations();
     await this.publishStats();
+  }
+
+  private armActivationWatcher(): void {
+    if (!document.body) {
+      return;
+    }
+
+    if (!this.activationObserver) {
+      this.activationObserver = new MutationObserver(() => {
+        this.queueActivationCheck();
+      });
+      this.activationObserver.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+    }
+  }
+
+  private disarmActivationWatcher(): void {
+    this.activationObserver?.disconnect();
+    this.activationObserver = undefined;
+    this.activationCheckQueued = false;
+  }
+
+  private resetSessionState(): void {
+    this.mutationObserver?.disconnect();
+    this.mutationObserver = undefined;
+    this.scrollManager?.disconnect();
+    this.scrollManager = undefined;
+    this.virtualizer = undefined;
+    this.currentSessionState = undefined;
+    this.records = [];
+    this.scrollContainer = null;
+  }
+
+  private queueActivationCheck(): void {
+    if (this.activationCheckQueued) {
+      return;
+    }
+
+    this.activationCheckQueued = true;
+    queueMicrotask(() => {
+      this.activationCheckQueued = false;
+      void this.ensureSessionStarted();
+    });
   }
 
   private ensureSearchOverlay(): void {
@@ -279,7 +346,7 @@ export class SessionController {
 
   private async publishStats(): Promise<void> {
     try {
-      await chrome.runtime?.sendMessage({
+      await globalThis.chrome?.runtime?.sendMessage({
         type: 'session-stats',
         payload: this.getStats()
       });

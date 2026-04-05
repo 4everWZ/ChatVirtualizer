@@ -6,14 +6,18 @@ describe('chatgpt page adapter', () => {
     installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
 
     const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
 
     expect(adapter.canHandlePage()).toBe(true);
     expect(adapter.getSessionId()).toBe('local-session');
+    expect(scrollContainer?.dataset.scrollRoot).toBe('');
 
     const turns = adapter.collectTurnCandidates();
 
     expect(turns.length).toBeGreaterThan(10);
     expect(turns[0]?.role).toBe('user');
+    expect(turns[0]?.id).toBe('turn-1');
+    expect(turns[1]?.role).toBe('assistant');
   });
 
   test('fails closed on unknown layouts', () => {

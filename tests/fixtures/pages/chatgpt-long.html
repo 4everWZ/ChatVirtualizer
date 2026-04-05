@@ -5,33 +5,113 @@
     <title>ChatGPT Fixture</title>
   </head>
   <body>
-    <main>
-      <section aria-label="Chat history" data-ecv-scroll-container style="height: 800px; overflow-y: auto;">
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 1</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 1</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 2</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 2</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 3</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 3</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 4</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 4</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 5</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 5</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 6</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 6</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 7</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 7</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 8</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 8</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 9</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 9</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 10</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 10</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 11</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 11</div></article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Question 12</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>Answer 12</div></article>
-      </section>
-    </main>
+    <div style="display: flex; height: 100vh;">
+      <nav aria-label="Chat history" style="width: 260px; height: 800px; overflow-y: auto;">
+        <a href="/c/other-session">Recent chat</a>
+      </nav>
+
+      <div data-scroll-root data-scroll-from-top style="height: 800px; overflow-y: auto; flex: 1;">
+        <main id="main" class="min-h-0 flex-1">
+          <div id="thread" class="group/thread flex flex-col min-h-full">
+            <section data-turn-id="turn-1" data-testid="conversation-turn-1" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 1</div>
+            </section>
+            <section data-turn-id="turn-2" data-testid="conversation-turn-2" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 1</div>
+            </section>
+            <section data-turn-id="turn-3" data-testid="conversation-turn-3" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 2</div>
+            </section>
+            <section data-turn-id="turn-4" data-testid="conversation-turn-4" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 2</div>
+            </section>
+            <section data-turn-id="turn-5" data-testid="conversation-turn-5" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 3</div>
+            </section>
+            <section data-turn-id="turn-6" data-testid="conversation-turn-6" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 3</div>
+            </section>
+            <section data-turn-id="turn-7" data-testid="conversation-turn-7" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 4</div>
+            </section>
+            <section data-turn-id="turn-8" data-testid="conversation-turn-8" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 4</div>
+            </section>
+            <section data-turn-id="turn-9" data-testid="conversation-turn-9" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 5</div>
+            </section>
+            <section data-turn-id="turn-10" data-testid="conversation-turn-10" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 5</div>
+            </section>
+            <section data-turn-id="turn-11" data-testid="conversation-turn-11" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 6</div>
+            </section>
+            <section data-turn-id="turn-12" data-testid="conversation-turn-12" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 6</div>
+            </section>
+            <section data-turn-id="turn-13" data-testid="conversation-turn-13" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 7</div>
+            </section>
+            <section data-turn-id="turn-14" data-testid="conversation-turn-14" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 7</div>
+            </section>
+            <section data-turn-id="turn-15" data-testid="conversation-turn-15" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 8</div>
+            </section>
+            <section data-turn-id="turn-16" data-testid="conversation-turn-16" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 8</div>
+            </section>
+            <section data-turn-id="turn-17" data-testid="conversation-turn-17" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 9</div>
+            </section>
+            <section data-turn-id="turn-18" data-testid="conversation-turn-18" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 9</div>
+            </section>
+            <section data-turn-id="turn-19" data-testid="conversation-turn-19" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 10</div>
+            </section>
+            <section data-turn-id="turn-20" data-testid="conversation-turn-20" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 10</div>
+            </section>
+            <section data-turn-id="turn-21" data-testid="conversation-turn-21" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 11</div>
+            </section>
+            <section data-turn-id="turn-22" data-testid="conversation-turn-22" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 11</div>
+            </section>
+            <section data-turn-id="turn-23" data-testid="conversation-turn-23" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Question 12</div>
+            </section>
+            <section data-turn-id="turn-24" data-testid="conversation-turn-24" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>Answer 12</div>
+            </section>
+          </div>
+        </main>
+      </div>
+    </div>
   </body>
 </html>

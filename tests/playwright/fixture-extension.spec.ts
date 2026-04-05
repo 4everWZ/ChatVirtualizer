@@ -39,7 +39,7 @@ test.describe.serial('extension fixture flows', () => {
     await expect(page.locator('.ecv-placeholder')).toHaveCount(2);
 
     await page.evaluate(() => {
-      const container = document.querySelector<HTMLElement>('[data-ecv-scroll-container]');
+      const container = document.querySelector<HTMLElement>('[data-scroll-root], [data-ecv-scroll-container]');
       if (!container) {
         throw new Error('missing scroll container');
       }

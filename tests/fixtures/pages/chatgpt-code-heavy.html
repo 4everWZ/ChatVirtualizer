@@ -5,17 +5,35 @@
     <title>ChatGPT Fixture Code</title>
   </head>
   <body>
-    <main>
-      <section aria-label="Chat history" data-ecv-scroll-container style="height: 800px; overflow-y: auto;">
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Show the code block</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 160px;">
-          <div>
-            <pre><code>const value = 42;</code></pre>
+    <div style="display: flex; height: 100vh;">
+      <nav aria-label="Chat history" style="width: 260px; height: 800px; overflow-y: auto;">
+        <a href="/c/local-session">Long fixture</a>
+      </nav>
+
+      <div data-scroll-root data-scroll-from-top style="height: 800px; overflow-y: auto; flex: 1;">
+        <main id="main" class="min-h-0 flex-1">
+          <div id="thread" class="group/thread flex flex-col min-h-full">
+            <section data-turn-id="code-turn-1" data-testid="conversation-turn-1" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Show the code block</div>
+            </section>
+            <section data-turn-id="code-turn-2" data-testid="conversation-turn-2" data-turn="assistant" style="min-height: 180px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>
+                <pre><code>const value = 42;</code></pre>
+              </div>
+            </section>
+            <section data-turn-id="code-turn-3" data-testid="conversation-turn-3" data-turn="user" style="min-height: 120px;">
+              <h4 class="sr-only select-none">You said:</h4>
+              <div>Explain it</div>
+            </section>
+            <section data-turn-id="code-turn-4" data-testid="conversation-turn-4" data-turn="assistant" style="min-height: 120px;">
+              <h4 class="sr-only select-none">ChatGPT said:</h4>
+              <div>The code returns 42.</div>
+            </section>
           </div>
-        </article>
-        <article data-turn-root data-message-author-role="user" style="min-height: 120px;"><div>Explain it</div></article>
-        <article data-turn-root data-message-author-role="assistant" style="min-height: 120px;"><div>The code returns 42.</div></article>
-      </section>
-    </main>
+        </main>
+      </div>
+    </div>
   </body>
 </html>
