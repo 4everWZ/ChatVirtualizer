@@ -8,6 +8,8 @@ interface VirtualizationEngineOptions {
   config: ExtensionConfig;
   logger?: Logger;
   snapshotStore: SnapshotStore;
+  detachedRootRetentionMs?: number;
+  snapshotSerializeDelayMs?: number;
 }
 
 interface CollapsedGroupRange {
@@ -19,20 +21,28 @@ interface CollapsedGroupRange {
 }
 
 export class VirtualizationEngine {
+  private readonly detachedRootRetentionMs: number;
   private readonly config: ExtensionConfig;
   private readonly logger: Logger;
+  private readonly snapshotSerializeDelayMs: number;
   private readonly snapshotStore: SnapshotStore;
   private readonly pendingSnapshotWrites = new Map<string, Promise<void>>();
   private readonly snapshotCache = new Map<string, RecordSnapshot>();
+  private readonly pendingSnapshotRecordIds = new Set<string>();
+  private readonly detachedRootExpiry = new Map<string, number>();
 
   private collapsedGroups: CollapsedGroupRange[] = [];
   private records: QARecord[] = [];
   private scrollContainer: HTMLElement | null = null;
+  private detachedRootReleaseTimer?: number;
+  private snapshotSerializeTimer?: number;
 
   constructor(options: VirtualizationEngineOptions) {
     this.config = options.config;
     this.snapshotStore = options.snapshotStore;
     this.logger = options.logger ?? new Logger(options.config.debugLogging);
+    this.detachedRootRetentionMs = options.detachedRootRetentionMs ?? 5_000;
+    this.snapshotSerializeDelayMs = options.snapshotSerializeDelayMs ?? 1_000;
   }
 
   async attach(scrollContainer: HTMLElement, records: QARecord[]): Promise<void> {
@@ -81,6 +91,19 @@ export class VirtualizationEngine {
   }
 
   dispose(): void {
+    if (this.snapshotSerializeTimer !== undefined) {
+      clearTimeout(this.snapshotSerializeTimer);
+      this.snapshotSerializeTimer = undefined;
+    }
+
+    if (this.detachedRootReleaseTimer !== undefined) {
+      clearTimeout(this.detachedRootReleaseTimer);
+      this.detachedRootReleaseTimer = undefined;
+    }
+
+    this.pendingSnapshotRecordIds.clear();
+    this.detachedRootExpiry.clear();
+
     for (const group of this.collapsedGroups) {
       group.element.remove();
     }
@@ -169,6 +192,10 @@ export class VirtualizationEngine {
     record.detachedRoot = detachedRoot;
     record.rootElement = null;
     record.mounted = false;
+    this.pendingSnapshotRecordIds.add(record.id);
+    this.detachedRootExpiry.set(record.id, Date.now() + this.detachedRootRetentionMs);
+    this.scheduleSnapshotSerialization();
+    this.scheduleDetachedRootRelease();
     this.logger.debug('Evicted record', record.id);
   }
 
@@ -187,6 +214,8 @@ export class VirtualizationEngine {
       }
 
       record.detachedRoot = null;
+      this.detachedRootExpiry.delete(record.id);
+      this.scheduleDetachedRootRelease();
       record.rootElement = wrapper;
       record.mounted = true;
       record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
@@ -341,7 +370,7 @@ export class VirtualizationEngine {
       throw new Error(`Record ${record.id} is missing a root element`);
     }
 
-    const sanitizedHtml = sanitizeHtml(sourceRoot.innerHTML);
+    const sanitizedHtml = createLightweightSnapshotHtml(sourceRoot);
     const now = Date.now();
 
     return {
@@ -372,7 +401,82 @@ export class VirtualizationEngine {
     this.pendingSnapshotWrites.set(writeKey, writePromise);
   }
 
+  private scheduleSnapshotSerialization(): void {
+    if (this.snapshotSerializeTimer !== undefined) {
+      return;
+    }
+
+    this.snapshotSerializeTimer = window.setTimeout(() => {
+      this.snapshotSerializeTimer = undefined;
+      void this.flushPendingSnapshotSerialization();
+    }, this.snapshotSerializeDelayMs);
+  }
+
+  private async flushPendingSnapshotSerialization(): Promise<void> {
+    const recordIds = Array.from(this.pendingSnapshotRecordIds);
+    this.pendingSnapshotRecordIds.clear();
+
+    for (const recordId of recordIds) {
+      const record = this.findRecord(recordId);
+      if (!record || record.mounted || !record.detachedRoot || this.snapshotCache.has(recordId)) {
+        continue;
+      }
+
+      const snapshot = this.createSnapshot(record, record.detachedRoot);
+      this.snapshotCache.set(record.id, snapshot);
+      record.snapshotHtml = snapshot.html;
+      this.queueSnapshotPersist(snapshot);
+    }
+
+    this.releaseExpiredDetachedRoots();
+  }
+
+  private scheduleDetachedRootRelease(): void {
+    if (this.detachedRootReleaseTimer !== undefined) {
+      clearTimeout(this.detachedRootReleaseTimer);
+      this.detachedRootReleaseTimer = undefined;
+    }
+
+    const nextExpiry = Math.min(...Array.from(this.detachedRootExpiry.values()));
+    if (!Number.isFinite(nextExpiry)) {
+      return;
+    }
+
+    const delay = Math.max(0, nextExpiry - Date.now());
+    this.detachedRootReleaseTimer = window.setTimeout(() => {
+      this.detachedRootReleaseTimer = undefined;
+      this.releaseExpiredDetachedRoots();
+    }, delay);
+  }
+
+  private releaseExpiredDetachedRoots(now = Date.now()): void {
+    for (const [recordId, expiry] of this.detachedRootExpiry.entries()) {
+      const record = this.findRecord(recordId);
+      if (!record || record.mounted || !record.detachedRoot) {
+        this.detachedRootExpiry.delete(recordId);
+        continue;
+      }
+
+      if (expiry > now || !this.snapshotCache.has(recordId)) {
+        continue;
+      }
+
+      record.detachedRoot = null;
+      this.detachedRootExpiry.delete(recordId);
+      this.logger.debug('Released detached root after ttl', record.id);
+    }
+
+    this.scheduleDetachedRootRelease();
+  }
+
   async persistCollapsedSnapshots(): Promise<void> {
+    if (this.snapshotSerializeTimer !== undefined) {
+      clearTimeout(this.snapshotSerializeTimer);
+      this.snapshotSerializeTimer = undefined;
+    }
+
+    await this.flushPendingSnapshotSerialization();
+
     for (const record of this.records) {
       if (!record.detachedRoot || record.mounted || this.snapshotCache.has(record.id)) {
         continue;
@@ -383,16 +487,36 @@ export class VirtualizationEngine {
       record.snapshotHtml = snapshot.html;
       this.queueSnapshotPersist(snapshot);
       record.detachedRoot = null;
+      this.detachedRootExpiry.delete(record.id);
     }
+
+    this.scheduleDetachedRootRelease();
   }
 }
 
-function sanitizeHtml(html: string): string {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  for (const selector of ['script', 'iframe', 'object']) {
-    template.content.querySelectorAll(selector).forEach((node) => node.remove());
+function createLightweightSnapshotHtml(sourceRoot: HTMLElement): string {
+  const clone = sourceRoot.cloneNode(true);
+  if (!(clone instanceof HTMLElement)) {
+    return '';
   }
+
+  for (const selector of ['script', 'iframe', 'object', '.ecv-collapsed-group', '[hidden="until-found"][data-record-id]']) {
+    clone.querySelectorAll(selector).forEach((node) => node.remove());
+  }
+
+  for (const selector of [
+    'button',
+    '[role="button"]',
+    '[data-testid="copy-turn-action-button"]',
+    '[data-testid="good-response-turn-action-button"]',
+    '[data-testid="bad-response-turn-action-button"]',
+    '[data-testid="webpage-citation-pill"]'
+  ]) {
+    clone.querySelectorAll(selector).forEach((node) => node.remove());
+  }
+
+  const template = document.createElement('template');
+  template.innerHTML = clone.innerHTML;
   return template.innerHTML;
 }
 

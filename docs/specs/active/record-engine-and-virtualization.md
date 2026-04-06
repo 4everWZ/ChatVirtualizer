@@ -20,7 +20,8 @@ The current version targets reading fidelity after restore rather than full Reac
 - Contiguous unmounted records are rendered as a single compact collapsed group with one visible summary row and one `hidden="until-found"` reservoir per record.
 - Scroll compensation is the measured delta between the pre-restore and post-restore scroll height applied back onto `scrollTop`.
 - Initial collapse must not force synchronous layout reads or eager HTML snapshot serialization on the hot path. Height stays on the record engine's estimated value during attach, collapse, and same-session restore.
-- Same-session restore prefers detached DOM roots captured at eviction time. Sanitized HTML snapshots are persisted only as a best-effort stop-time path, not as part of the initial live-page collapse.
+- Evicted records keep detached DOM roots only for a short same-session retention window. Snapshot serialization is deferred off the collapse hot path, and once a lightweight snapshot is ready and the retention TTL expires, the detached DOM is released.
+- Snapshot restore uses sanitized lightweight HTML that preserves reading content while stripping heavy interaction chrome such as old turn action buttons and citation pills.
 - Same-session reindex must merge the current visible DOM tail back into the in-memory record set instead of throwing away collapsed history on every mutation.
 - Site quick-jump expansion reuses the same range-restore path as top-triggered restore and restores `target +/- searchContextBefore/searchContextAfter`.
 
@@ -38,7 +39,7 @@ The current version targets reading fidelity after restore rather than full Reac
 - Range-based restore keeps the implementation predictable and easier to verify than fine-grained node streaming.
 - Compact grouped folds materially reduce scroll height, but they give up the exact scroll geometry that equal-height placeholders would preserve.
 - Re-compressing far-away restored records limits DOM growth without requiring complex predictive scheduling.
-- Detached in-memory roots increase same-session memory use, but they remove the real-world startup penalty that eager snapshot generation caused on large live ChatGPT threads.
+- Short-lived detached roots keep immediate same-session restores fast, but after the TTL expires the system restores from lighter snapshot HTML rather than the original DOM tree.
 - Keeping generating or protected records outside the nominal 10-record tail means mounted count can temporarily exceed `windowSizeQa`, but it avoids collapsing active or user-focused content.
 
 ## Verification
@@ -46,3 +47,4 @@ The current version targets reading fidelity after restore rather than full Reac
 - Unit tests must cover grouping rules, record-state transitions, window calculations, and collapsed-group metadata.
 - DOM integration tests must confirm initial compression, grouped folds, top restore, scroll compensation, generating protection, same-session auto-compress after tail growth, manual-expanded preservation, and no-op degradation when restore cannot complete safely.
 - Virtualization tests must assert that initial attach and collapse do not call `getBoundingClientRect()` and do not synchronously read evicted record `innerHTML`.
+- Virtualization tests must assert that detached roots are released after the retention TTL once snapshots are ready, and that snapshot restore omits heavy action chrome while keeping readable message content.

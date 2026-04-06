@@ -13,5 +13,5 @@
 - **Reasoning:** MV3 service workers suspend aggressively, so direct content-tab queries keep popup state accurate after cache loss.
 
 - **Original Spec/Idea:** Collapsed records would be serialized into sanitized IndexedDB snapshots as part of the live-page initial virtualization pass.
-- **Actual Implementation:** Initial virtualization keeps collapsed records as detached DOM roots for same-session restore and only attempts sanitized snapshot persistence as a best-effort stop-time path.
-- **Reasoning:** Real ChatGPT A/B verification on April 6, 2026 showed that eager hot-path snapshot generation materially regressed live conversation load time, while detached in-memory restore preserved the user-visible restore path without that startup penalty.
+- **Actual Implementation:** Initial virtualization keeps collapsed records as detached DOM roots only for a short same-session TTL, prepares lightweight snapshots off the hot path, and releases the original detached DOM once a snapshot is ready and the TTL expires.
+- **Reasoning:** Real ChatGPT A/B verification on April 6, 2026 showed that eager hot-path snapshot generation materially regressed live conversation load time, while indefinite detached-root retention left too much memory pressure. Deferred lightweight snapshots preserve fast short-range restore while allowing the old DOM tree to be released.

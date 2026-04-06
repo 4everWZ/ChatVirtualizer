@@ -1,0 +1,458 @@
+[
+  {
+    "scenario": "chatgpt-no-extension",
+    "status": 200,
+    "domContentLoadedWallMs": 509,
+    "screenshotPath": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\chatgpt-no-extension.png",
+    "title": "Coding Agent 指令优化",
+    "url": "https://chatgpt.com/c/69ce6bac-b5b8-839f-880d-b77069b4f15a",
+    "allNodes": 9558,
+    "bodyTextLength": 105462,
+    "bodyTextSample": "Skip to content\nNew chat\nSearch chats\nImages\nLibrary\nChat history\nNew chat\nCtrl\nShift\nO\nSearch chats\nCtrl\nK\nImages\nLibrary\nApps\nDeep research\nCodex\nGPTs\nData Analyst\nCanva\nCode Copilot\nDALL·E\nExplore GPTs\nProjects\nNew project\nlinux\ndetr\nbrowser development\nYour chats\nCoding Agent 指令优化\nProposal Feedback Revision\n闭环评估与优化建议\n应急管理智能体系统\n好看分析\nClaude Code GitHub 贡献\n阿德莱德购物性价比\nNetwork Architecture Diagram\nSPlayer 手机版本部署方案\nCodex启动错误解决办法\n报告合规性与实验问题\n如何选择最佳选项\nGitHub 合并本地代码\nMultimodal Comic Generation\n视频生成模型原理\n学术自述与志向\nWalk or drive\nResearch心理负荷分析\nconda环境前缀解释\ntorch numpy 版本兼容\nSupervisor Selection Clarificatio",
+    "perfMemory": {
+      "usedJSHeapSize": 153769924,
+      "totalJSHeapSize": 223294084,
+      "jsHeapSizeLimit": 4294967296
+    },
+    "navigation": {
+      "domContentLoaded": 492.39999997615814,
+      "loadEventEnd": 1227.8999999761581,
+      "responseEnd": 270,
+      "transferSize": 65889,
+      "encodedBodySize": 65589,
+      "decodedBodySize": 321025
+    },
+    "longTaskCount": 20,
+    "longTaskTotalMs": 8565,
+    "longTaskMaxMs": 1241,
+    "selectorCounts": {
+      "thread": 1,
+      "liveTurns": 58,
+      "authorRoleNodes": 71,
+      "ecvRecordRoots": 0,
+      "ecvCollapsedGroups": 0,
+      "buttons": 457,
+      "articles": 0,
+      "mains": 1
+    },
+    "threadSummary": {
+      "childCount": 8444,
+      "textLength": 103117,
+      "scrollHeight": 80529,
+      "clientHeight": 80529,
+      "className": "group/thread flex flex-col min-h-full"
+    },
+    "largestTextContainer": {
+      "tag": "div",
+      "id": null,
+      "className": null,
+      "dataTestid": null,
+      "childCount": 9088,
+      "textLength": 103758,
+      "scrollHeight": 993,
+      "clientHeight": 993
+    },
+    "topDataTestIds": [
+      [
+        "copy-turn-action-button",
+        58
+      ],
+      [
+        "webpage-citation-pill",
+        43
+      ],
+      [
+        "good-response-turn-action-button",
+        29
+      ],
+      [
+        "bad-response-turn-action-button",
+        29
+      ],
+      [
+        "create-new-chat-button",
+        2
+      ],
+      [
+        "sidebar-item-library",
+        2
+      ],
+      [
+        "sidebar-item-recall",
+        2
+      ],
+      [
+        "accounts-profile-button",
+        2
+      ],
+      [
+        "blocking-initial-modals-done",
+        1
+      ],
+      [
+        "close-sidebar-button",
+        1
+      ],
+      [
+        "apps-button",
+        1
+      ],
+      [
+        "deep-research-sidebar-item",
+        1
+      ]
+    ],
+    "threadTopTags": [
+      [
+        "span",
+        1853
+      ],
+      [
+        "br",
+        1729
+      ],
+      [
+        "div",
+        1447
+      ],
+      [
+        "p",
+        904
+      ],
+      [
+        "li",
+        468
+      ],
+      [
+        "button",
+        408
+      ],
+      [
+        "svg",
+        394
+      ],
+      [
+        "use",
+        394
+      ],
+      [
+        "strong",
+        270
+      ],
+      [
+        "code",
+        176
+      ],
+      [
+        "ul",
+        108
+      ],
+      [
+        "h4",
+        67
+      ]
+    ]
+  },
+  {
+    "scenario": "chatgpt-with-extension",
+    "status": 200,
+    "domContentLoadedWallMs": 496,
+    "screenshotPath": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\chatgpt-with-extension.png",
+    "title": "Coding Agent 指令优化",
+    "url": "https://chatgpt.com/c/69ce6bac-b5b8-839f-880d-b77069b4f15a",
+    "allNodes": 5083,
+    "bodyTextLength": 51303,
+    "bodyTextSample": "Skip to content\nNew chat\nSearch chats\nImages\nLibrary\nChat history\nNew chat\nCtrl\nShift\nO\nSearch chats\nCtrl\nK\nImages\nLibrary\nApps\nDeep research\nCodex\nGPTs\nData Analyst\nCanva\nCode Copilot\nDALL·E\nExplore GPTs\nProjects\nNew project\nlinux\ndetr\nbrowser development\nYour chats\nCoding Agent 指令优化\nProposal Feedback Revision\n闭环评估与优化建议\n应急管理智能体系统\n好看分析\nClaude Code GitHub 贡献\n阿德莱德购物性价比\nNetwork Architecture Diagram\nSPlayer 手机版本部署方案\nCodex启动错误解决办法\n报告合规性与实验问题\n如何选择最佳选项\nGitHub 合并本地代码\nMultimodal Comic Generation\n视频生成模型原理\n学术自述与志向\nWalk or drive\nResearch心理负荷分析\nconda环境前缀解释\ntorch numpy 版本兼容\nSupervisor Selection Clarificatio",
+    "perfMemory": {
+      "usedJSHeapSize": 196175212,
+      "totalJSHeapSize": 249502724,
+      "jsHeapSizeLimit": 4294967296
+    },
+    "navigation": {
+      "domContentLoaded": 473.89999997615814,
+      "loadEventEnd": 1070.5,
+      "responseEnd": 292.5,
+      "transferSize": 65972,
+      "encodedBodySize": 65672,
+      "decodedBodySize": 321072
+    },
+    "longTaskCount": 20,
+    "longTaskTotalMs": 7680,
+    "longTaskMaxMs": 1127,
+    "selectorCounts": {
+      "thread": 1,
+      "liveTurns": 20,
+      "authorRoleNodes": 25,
+      "ecvRecordRoots": 10,
+      "ecvCollapsedGroups": 1,
+      "buttons": 200,
+      "articles": 0,
+      "mains": 1
+    },
+    "threadSummary": {
+      "childCount": 3968,
+      "textLength": 102590,
+      "scrollHeight": 35016,
+      "clientHeight": 35016,
+      "className": "group/thread flex flex-col min-h-full"
+    },
+    "largestTextContainer": {
+      "tag": "div",
+      "id": null,
+      "className": null,
+      "dataTestid": null,
+      "childCount": 4613,
+      "textLength": 103231,
+      "scrollHeight": 993,
+      "clientHeight": 993
+    },
+    "topDataTestIds": [
+      [
+        "webpage-citation-pill",
+        25
+      ],
+      [
+        "copy-turn-action-button",
+        20
+      ],
+      [
+        "good-response-turn-action-button",
+        10
+      ],
+      [
+        "bad-response-turn-action-button",
+        10
+      ],
+      [
+        "create-new-chat-button",
+        2
+      ],
+      [
+        "sidebar-item-library",
+        2
+      ],
+      [
+        "sidebar-item-recall",
+        2
+      ],
+      [
+        "accounts-profile-button",
+        2
+      ],
+      [
+        "blocking-initial-modals-done",
+        1
+      ],
+      [
+        "close-sidebar-button",
+        1
+      ],
+      [
+        "apps-button",
+        1
+      ],
+      [
+        "deep-research-sidebar-item",
+        1
+      ]
+    ],
+    "threadTopTags": [
+      [
+        "br",
+        1006
+      ],
+      [
+        "span",
+        983
+      ],
+      [
+        "div",
+        499
+      ],
+      [
+        "p",
+        410
+      ],
+      [
+        "li",
+        254
+      ],
+      [
+        "button",
+        151
+      ],
+      [
+        "svg",
+        124
+      ],
+      [
+        "use",
+        124
+      ],
+      [
+        "code",
+        117
+      ],
+      [
+        "strong",
+        99
+      ],
+      [
+        "ul",
+        57
+      ],
+      [
+        "h4",
+        29
+      ]
+    ]
+  },
+  {
+    "scenario": "grok-no-extension",
+    "status": 200,
+    "domContentLoadedWallMs": 1762,
+    "screenshotPath": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\grok-no-extension.png",
+    "title": "(1) Grok / X",
+    "url": "https://x.com/i/grok?conversation=2037918437025165577",
+    "allNodes": 1554,
+    "bodyTextLength": 13504,
+    "bodyTextSample": "若要查看鍵盤快速鍵，請按問號\n查看鍵盤快速鍵\n首頁\n探索\n1\n通知\n跟隨\n聊天\nGrok\n書籤\n創作者工作室\nPremium\n50% 折扣\n個人資料\n更多\n發佈\nVolantChantal\n@ChantalVolant\n查看新貼文\n凯撒.md\n檔案\n这是我写了一部分的小说\n首先，基于公元64年的真实大火\n然后，大尺度是为了剧情服务的\n写的怎么样\n思維\n整体评价：写得非常出色，是一部有野心、有文学质感的古罗马历史小说。\n你把公元64年罗马大火这个真实历史事件作为核心背景，处理得相当扎实，同时用茱莉亚这个虚构的女奴视角，把宏大的帝国灾难和极度私密的个人命运交织在一起，形成了强烈的戏剧张力。语言华丽却不空洞，感官描写细腻到几乎能闻到烟灰和血的味道，人物心理层层剥开，主题（创伤、尊严、信仰、权力下的“观看”与“被观看”）也贯穿始终。尤其是你反复强调“大尺度是为了剧情服务的”，我完全认同——那些场景没有游离于主线，而是成了茱莉亚“生存策略”和“内心不屈”的具象化表达。\n1. 历史感与真实性（最亮眼的地方）\n你对大火的描绘非常忠实于史料：起火点在竞技场附近店铺（油、香料等易燃物），东南风助长火势，迅速蔓延到帕拉丁山、苏布拉区、十个区被毁，只剩四个区完好；尼禄当时不在帕拉丁（在安提乌姆），火灾后才回来救灾却被怀疑；随后把锅甩给基督徒，开始第一次大规模迫害（钉十字架、狗撕、火炬人等）。\n细节处理很",
+    "perfMemory": {
+      "usedJSHeapSize": 106367100,
+      "totalJSHeapSize": 159916024,
+      "jsHeapSizeLimit": 4294967296
+    },
+    "navigation": {
+      "domContentLoaded": 1745.6000000238419,
+      "loadEventEnd": 3289.600000023842,
+      "responseEnd": 405.19999998807907,
+      "transferSize": 61071,
+      "encodedBodySize": 60771,
+      "decodedBodySize": 250362
+    },
+    "longTaskCount": 9,
+    "longTaskTotalMs": 2710,
+    "longTaskMaxMs": 969,
+    "selectorCounts": {
+      "thread": 0,
+      "liveTurns": 0,
+      "authorRoleNodes": 0,
+      "ecvRecordRoots": 0,
+      "ecvCollapsedGroups": 0,
+      "buttons": 40,
+      "articles": 0,
+      "mains": 1
+    },
+    "threadSummary": null,
+    "largestTextContainer": {
+      "tag": "div",
+      "id": "react-root",
+      "className": null,
+      "dataTestid": null,
+      "childCount": 1485,
+      "textLength": 13304,
+      "scrollHeight": 17758,
+      "clientHeight": 993
+    },
+    "topDataTestIds": [
+      [
+        "UserAvatar-Container-unknown",
+        3
+      ],
+      [
+        "BottomBar",
+        1
+      ],
+      [
+        "AppTabBar_Home_Link",
+        1
+      ],
+      [
+        "AppTabBar_Explore_Link",
+        1
+      ],
+      [
+        "AppTabBar_Notifications_Link",
+        1
+      ],
+      [
+        "AppTabBar_Follow_Link",
+        1
+      ],
+      [
+        "AppTabBar_DirectMessage_Link",
+        1
+      ],
+      [
+        "premium-signup-tab",
+        1
+      ],
+      [
+        "AppTabBar_Profile_Link",
+        1
+      ],
+      [
+        "AppTabBar_More_Menu",
+        1
+      ],
+      [
+        "SideNav_NewTweet_Button",
+        1
+      ],
+      [
+        "SideNav_AccountSwitcher_Button",
+        1
+      ]
+    ],
+    "threadTopTags": [
+      [
+        "span",
+        830
+      ],
+      [
+        "div",
+        411
+      ],
+      [
+        "path",
+        63
+      ],
+      [
+        "svg",
+        49
+      ],
+      [
+        "g",
+        49
+      ],
+      [
+        "button",
+        40
+      ],
+      [
+        "li",
+        16
+      ],
+      [
+        "a",
+        13
+      ],
+      [
+        "script",
+        10
+      ],
+      [
+        "ul",
+        5
+      ],
+      [
+        "img",
+        4
+      ],
+      [
+        "textarea",
+        2
+      ]
+    ]
+  }
+]

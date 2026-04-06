@@ -1,0 +1,25 @@
+{
+  "domContentLoadedWallMs": 524,
+  "title": "Coding Agent 指令优化",
+  "url": "https://chatgpt.com/c/69ce6bac-b5b8-839f-880d-b77069b4f15a",
+  "allNodes": 5083,
+  "bodyTextLength": 51303,
+  "perfMemory": {
+    "usedJSHeapSize": 132079431,
+    "totalJSHeapSize": 196048775,
+    "jsHeapSizeLimit": 4294967296
+  },
+  "longTaskCount": 21,
+  "longTaskTotalMs": 9756,
+  "longTaskMaxMs": 1165,
+  "navigation": {
+    "domContentLoaded": 501.60000002384186,
+    "loadEventEnd": 1281.7000000476837
+  },
+  "selectorCounts": {
+    "liveTurns": 20,
+    "ecvRecordRoots": 10,
+    "ecvCollapsedGroups": 1,
+    "buttons": 200
+  }
+}

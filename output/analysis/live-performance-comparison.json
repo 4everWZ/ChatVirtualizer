@@ -1,0 +1,245 @@
+[
+  {
+    "label": "chatgpt-no-extension",
+    "status": 200,
+    "domContentLoadedMs": 16606,
+    "title": "ChatGPT",
+    "url": "https://chatgpt.com/",
+    "readyState": "complete",
+    "allNodes": 560,
+    "selectorCounts": {
+      "#thread": 1,
+      "main#main": 1,
+      "[data-scroll-root]": 1,
+      "section[data-testid^=\"conversation-turn-\"]": 0,
+      "[data-message-author-role]": 0,
+      "article": 0,
+      "main": 1,
+      "[data-testid=\"conversation-turns\"]": 0,
+      "[role=\"listitem\"]": 0
+    },
+    "perfMemory": {
+      "jsHeapSizeLimit": 4294967296,
+      "totalJSHeapSize": 73530700,
+      "usedJSHeapSize": 63298892
+    },
+    "longTaskCount": 9,
+    "longTaskTotalMs": 1353,
+    "longTaskMaxMs": 419,
+    "navigation": {
+      "domContentLoaded": 16596.19999998808,
+      "loadEventEnd": 30448.899999976158,
+      "responseEnd": 12484.300000011921,
+      "transferSize": 57907,
+      "encodedBodySize": 57607,
+      "decodedBodySize": 300943,
+      "type": "navigate"
+    },
+    "threadSummary": {
+      "tag": "div",
+      "id": "thread",
+      "className": "group/thread flex flex-col min-h-full",
+      "childCount": 68,
+      "textLength": 368,
+      "scrollHeight": 1122,
+      "clientHeight": 1122
+    },
+    "threadTopTags": [
+      [
+        "div",
+        46
+      ],
+      [
+        "span",
+        4
+      ],
+      [
+        "input",
+        3
+      ],
+      [
+        "h1",
+        2
+      ],
+      [
+        "button",
+        2
+      ],
+      [
+        "svg",
+        2
+      ],
+      [
+        "use",
+        2
+      ],
+      [
+        "a",
+        2
+      ],
+      [
+        "form",
+        1
+      ],
+      [
+        "textarea",
+        1
+      ],
+      [
+        "script",
+        1
+      ],
+      [
+        "p",
+        1
+      ]
+    ],
+    "bodyTextLength": 264108,
+    "htmlClass": "light",
+    "bodyClass": null,
+    "screenshot": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\chatgpt-no-extension.png"
+  },
+  {
+    "label": "chatgpt-with-extension",
+    "status": 200,
+    "domContentLoadedMs": 14785,
+    "title": "ChatGPT",
+    "url": "https://chatgpt.com/",
+    "readyState": "complete",
+    "allNodes": 561,
+    "selectorCounts": {
+      "#thread": 1,
+      "main#main": 1,
+      "[data-scroll-root]": 1,
+      "section[data-testid^=\"conversation-turn-\"]": 0,
+      "[data-message-author-role]": 0,
+      "article": 0,
+      "main": 1,
+      "[data-testid=\"conversation-turns\"]": 0,
+      "[role=\"listitem\"]": 0
+    },
+    "perfMemory": {
+      "jsHeapSizeLimit": 4294967296,
+      "totalJSHeapSize": 55955093,
+      "usedJSHeapSize": 48702109
+    },
+    "longTaskCount": 6,
+    "longTaskTotalMs": 820,
+    "longTaskMaxMs": 313,
+    "navigation": {
+      "domContentLoaded": 14777,
+      "loadEventEnd": 75254.5,
+      "responseEnd": 11363.300000011921,
+      "transferSize": 57760,
+      "encodedBodySize": 57460,
+      "decodedBodySize": 300166,
+      "type": "navigate"
+    },
+    "threadSummary": {
+      "tag": "div",
+      "id": "thread",
+      "className": "group/thread flex flex-col min-h-full",
+      "childCount": 68,
+      "textLength": 368,
+      "scrollHeight": 1122,
+      "clientHeight": 1122
+    },
+    "threadTopTags": [
+      [
+        "div",
+        46
+      ],
+      [
+        "span",
+        4
+      ],
+      [
+        "input",
+        3
+      ],
+      [
+        "h1",
+        2
+      ],
+      [
+        "button",
+        2
+      ],
+      [
+        "svg",
+        2
+      ],
+      [
+        "use",
+        2
+      ],
+      [
+        "a",
+        2
+      ],
+      [
+        "form",
+        1
+      ],
+      [
+        "textarea",
+        1
+      ],
+      [
+        "script",
+        1
+      ],
+      [
+        "p",
+        1
+      ]
+    ],
+    "bodyTextLength": 263365,
+    "htmlClass": "light",
+    "bodyClass": null,
+    "screenshot": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\chatgpt-with-extension.png"
+  },
+  {
+    "label": "grok-no-extension",
+    "status": 200,
+    "domContentLoadedMs": 27891,
+    "title": "X",
+    "url": "https://x.com/i/flow/login?redirect_after_login=%2Fi%2Fgrok%3Fconversation%3D2037918437025165577",
+    "readyState": "complete",
+    "allNodes": 120,
+    "selectorCounts": {
+      "#thread": 0,
+      "main#main": 0,
+      "[data-scroll-root]": 0,
+      "section[data-testid^=\"conversation-turn-\"]": 0,
+      "[data-message-author-role]": 0,
+      "article": 0,
+      "main": 1,
+      "[data-testid=\"conversation-turns\"]": 0,
+      "[role=\"listitem\"]": 0
+    },
+    "perfMemory": {
+      "jsHeapSizeLimit": 4294967296,
+      "totalJSHeapSize": 79176102,
+      "usedJSHeapSize": 39309538
+    },
+    "longTaskCount": 6,
+    "longTaskTotalMs": 2424,
+    "longTaskMaxMs": 1441,
+    "navigation": {
+      "domContentLoaded": 27883.80000001192,
+      "loadEventEnd": 28508.30000001192,
+      "responseEnd": 15252.599999964237,
+      "transferSize": 59755,
+      "encodedBodySize": 59455,
+      "decodedBodySize": 247002,
+      "type": "navigate"
+    },
+    "threadSummary": null,
+    "threadTopTags": [],
+    "bodyTextLength": 224477,
+    "htmlClass": "",
+    "bodyClass": null,
+    "screenshot": "D:\\Code\\JavaScript\\ChatGPT_Virtualization\\output\\analysis\\grok-no-extension.png"
+  }
+]

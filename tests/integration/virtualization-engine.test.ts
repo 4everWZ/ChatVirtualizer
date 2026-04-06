@@ -135,6 +135,123 @@ describe('virtualization engine', () => {
       rectSpy.mockRestore();
     }
   });
+
+  test('releases detached roots after a short retention ttl once lightweight snapshots are ready', async () => {
+    vi.useFakeTimers();
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    const assistantTurn = document.querySelector<HTMLElement>('[data-turn-id="turn-2"]');
+    if (!assistantTurn) {
+      throw new Error('expected the oldest assistant turn');
+    }
+
+    assistantTurn.append(
+      createHeavyAction('copy-turn-action-button', 'Copy'),
+      createHeavyAction('good-response-turn-action-button', 'Good'),
+      createHeavyAction('bad-response-turn-action-button', 'Bad'),
+      createCitationPill()
+    );
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const snapshotStore = new MemorySnapshotStore();
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore,
+      detachedRootRetentionMs: 50,
+      snapshotSerializeDelayMs: 10
+    });
+
+    try {
+      await engine.attach(scrollContainer, records);
+      await engine.applyInitialWindow();
+
+      const oldestRecord = records[0];
+      if (!oldestRecord) {
+        throw new Error('expected the oldest record');
+      }
+
+      expect(oldestRecord.detachedRoot).not.toBeNull();
+      expect(oldestRecord.snapshotHtml).toBeUndefined();
+
+      await vi.advanceTimersByTimeAsync(10);
+
+      expect(oldestRecord.snapshotHtml).toBeDefined();
+      expect(await snapshotStore.getSnapshot('local-session', oldestRecord.id)).toBeDefined();
+      expect(oldestRecord.detachedRoot).not.toBeNull();
+
+      await vi.advanceTimersByTimeAsync(40);
+
+      expect(oldestRecord.detachedRoot).toBeNull();
+    } finally {
+      engine.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  test('restores released records from lightweight snapshots without heavy action chrome', async () => {
+    vi.useFakeTimers();
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    const assistantTurn = document.querySelector<HTMLElement>('[data-turn-id="turn-2"]');
+    if (!assistantTurn) {
+      throw new Error('expected the oldest assistant turn');
+    }
+
+    assistantTurn.append(
+      createHeavyAction('copy-turn-action-button', 'Copy'),
+      createHeavyAction('good-response-turn-action-button', 'Good'),
+      createHeavyAction('bad-response-turn-action-button', 'Bad'),
+      createCitationPill()
+    );
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const snapshotStore = new MemorySnapshotStore();
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore,
+      detachedRootRetentionMs: 20,
+      snapshotSerializeDelayMs: 5
+    });
+
+    try {
+      await engine.attach(scrollContainer, records);
+      await engine.applyInitialWindow();
+      await vi.advanceTimersByTimeAsync(20);
+
+      const oldestRecord = records[0];
+      if (!oldestRecord) {
+        throw new Error('expected the oldest record');
+      }
+
+      expect(oldestRecord.detachedRoot).toBeNull();
+
+      await engine.restoreRange(0, 0);
+
+      const restoredRoot = scrollContainer.querySelector<HTMLElement>('[data-record-id="local-session:record:0"]');
+      expect(restoredRoot).not.toBeNull();
+      expect(restoredRoot?.textContent).toContain('Question 1');
+      expect(restoredRoot?.textContent).toContain('Answer 1');
+      expect(restoredRoot?.querySelector('[data-testid="copy-turn-action-button"]')).toBeNull();
+      expect(restoredRoot?.querySelector('[data-testid="good-response-turn-action-button"]')).toBeNull();
+      expect(restoredRoot?.querySelector('[data-testid="bad-response-turn-action-button"]')).toBeNull();
+      expect(restoredRoot?.querySelector('[data-testid="webpage-citation-pill"]')).toBeNull();
+    } finally {
+      engine.dispose();
+      vi.useRealTimers();
+    }
+  });
 });
 
 class SlowSnapshotStore implements SnapshotStore {
@@ -179,4 +296,52 @@ class SlowSnapshotStore implements SnapshotStore {
   private key(sessionId: string, recordId: string): string {
     return `${sessionId}::${recordId}`;
   }
+}
+
+class MemorySnapshotStore implements SnapshotStore {
+  private readonly snapshots = new Map<string, RecordSnapshot>();
+
+  async putSnapshot(snapshot: RecordSnapshot): Promise<void> {
+    this.snapshots.set(this.key(snapshot.sessionId, snapshot.recordId), snapshot);
+  }
+
+  async getSnapshot(sessionId: string, recordId: string): Promise<RecordSnapshot | undefined> {
+    return this.snapshots.get(this.key(sessionId, recordId));
+  }
+
+  async getSnapshotsForSession(sessionId: string): Promise<RecordSnapshot[]> {
+    return Array.from(this.snapshots.values()).filter((snapshot) => snapshot.sessionId === sessionId);
+  }
+
+  async deleteSession(sessionId: string): Promise<void> {
+    for (const key of Array.from(this.snapshots.keys())) {
+      if (key.startsWith(`${sessionId}::`)) {
+        this.snapshots.delete(key);
+      }
+    }
+  }
+
+  async pruneSessions(): Promise<void> {}
+
+  async clear(): Promise<void> {
+    this.snapshots.clear();
+  }
+
+  private key(sessionId: string, recordId: string): string {
+    return `${sessionId}::${recordId}`;
+  }
+}
+
+function createHeavyAction(testId: string, text: string): HTMLButtonElement {
+  const button = document.createElement('button');
+  button.setAttribute('data-testid', testId);
+  button.textContent = text;
+  return button;
+}
+
+function createCitationPill(): HTMLSpanElement {
+  const pill = document.createElement('span');
+  pill.setAttribute('data-testid', 'webpage-citation-pill');
+  pill.textContent = 'Citation';
+  return pill;
 }

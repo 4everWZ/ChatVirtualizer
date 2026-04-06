@@ -19,6 +19,7 @@
 - Restore older history when the user reaches the top of the chat container
 - Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
 - Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
+- Keep collapsed DOM roots only briefly for same-session fast restore, then fall back to lightweight snapshots for lower memory retention
 - Expose popup stats and options for runtime configuration
 - Degrade safely when the page structure is unsupported
 - Stay event-driven end to end; no timer polling, busy waits, or CPU spin loops are allowed in runtime behavior
@@ -147,4 +148,5 @@ The current repository is wired to verify through:
 - ChatGPT Web only in the current version
 - Native browser find support is current-session only
 - Snapshot restore targets reading fidelity, not full site-internal component behavior parity
+- Released collapsed history restores as lightweight reading-state DOM, so old turn toolbars and similar interaction chrome are intentionally not preserved
 - The fixture browser suite verifies popup stats and native-find restore behavior; real signed-in ChatGPT validation is still an explicit optional step
