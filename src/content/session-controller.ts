@@ -4,6 +4,7 @@ import { ScrollManager } from '@/content/scroll/scroll-manager';
 import { VirtualizationEngine } from '@/content/virtualization/virtualization-engine';
 import { getTopRestoreRange } from '@/content/virtualization/window-manager';
 import { DEFAULT_CONFIG, mergeConfig } from '@/shared/config';
+import { createRecordId } from '@/shared/ids';
 import type { ExtensionConfig, PageAdapter, QARecord, SessionState } from '@/shared/contracts';
 import { Logger } from '@/shared/logger';
 import type { RuntimeMessage } from '@/shared/runtime-messages';
@@ -33,6 +34,8 @@ export class SessionController {
   private scrollContainer: HTMLElement | null = null;
   private isApplyingDomChanges = false;
   private initializationTimer?: number;
+  private cleanupQuickJumpListener?: () => void;
+  private cleanupScrollModeListener?: () => void;
   private reindexTimer?: number;
   private virtualizer?: VirtualizationEngine;
 
@@ -58,6 +61,7 @@ export class SessionController {
   stop(): void {
     globalThis.chrome?.runtime?.onMessage.removeListener(this.handleRuntimeMessage);
     void this.virtualizer?.persistCollapsedSnapshots();
+    this.virtualizer?.dispose();
     this.cleanupSessionObserver?.();
     this.cleanupSessionObserver = undefined;
     this.activationObserver?.disconnect();
@@ -65,6 +69,10 @@ export class SessionController {
     this.activationCheckQueued = false;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
+    this.cleanupQuickJumpListener?.();
+    this.cleanupQuickJumpListener = undefined;
+    this.cleanupScrollModeListener?.();
+    this.cleanupScrollModeListener = undefined;
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
 
@@ -129,37 +137,7 @@ export class SessionController {
 
     this.records = buildQaRecordsFromTurns(turns, sessionId);
 
-    this.currentSessionState = {
-      sessionId,
-      recordIdsInOrder: this.records.map((record) => record.id),
-      activeWindowStart: Math.max(this.records.length - this.config.windowSizeQa, 0),
-      activeWindowEnd: Math.max(this.records.length - 1, 0),
-      totalRecords: this.records.length,
-      fullyIndexed: true
-    };
-
-    this.virtualizer = new VirtualizationEngine({
-      config: this.config,
-      logger: this.logger,
-      snapshotStore: this.snapshotStore
-    });
-
-    await this.runWithoutMutationReindex(async () => {
-      await this.virtualizer?.attach(scrollContainer, this.records);
-      if (this.config.enableVirtualization) {
-        await this.virtualizer?.applyInitialWindow();
-      }
-      this.records = this.virtualizer?.getRecords() ?? this.records;
-    });
-
-    this.scrollManager?.disconnect();
-    this.scrollManager = new ScrollManager(scrollContainer, {
-      topThresholdPx: this.config.topThresholdPx,
-      onReachTop: () => this.restorePreviousBatch()
-    });
-
-    this.observeMutations();
-    await this.publishStats();
+    await this.applySessionRecords(sessionId, scrollContainer, this.records, this.currentSessionState?.windowMode ?? 'auto');
   }
 
   private armActivationWatcher(): void {
@@ -190,6 +168,12 @@ export class SessionController {
     this.mutationObserver = undefined;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
+    this.cleanupQuickJumpListener?.();
+    this.cleanupQuickJumpListener = undefined;
+    this.cleanupScrollModeListener?.();
+    this.cleanupScrollModeListener = undefined;
+    void this.virtualizer?.persistCollapsedSnapshots();
+    this.virtualizer?.dispose();
     this.virtualizer = undefined;
     this.currentSessionState = undefined;
     this.records = [];
@@ -251,6 +235,8 @@ export class SessionController {
     });
 
     this.mutationObserver.observe(this.scrollContainer, {
+      attributeFilter: ['aria-busy', 'data-generating'],
+      attributes: true,
       childList: true,
       subtree: true
     });
@@ -269,36 +255,37 @@ export class SessionController {
     const before = this.scrollContainer.scrollHeight;
     await this.runWithoutMutationReindex(async () => {
       await this.virtualizer?.restoreRange(range.start, range.end);
+      this.records = this.virtualizer?.getRecords() ?? this.records;
     });
     const after = this.scrollContainer.scrollHeight;
     this.scrollContainer.scrollTop += after - before;
-    this.currentSessionState.activeWindowStart = range.start;
+    this.setWindowMode('manual-expanded');
+    this.syncSessionState();
     await this.publishStats();
   }
 
   private async reindexSession(): Promise<void> {
     const sessionId = this.adapter.getSessionId();
-    if (!this.currentSessionState || !this.virtualizer || this.currentSessionState.sessionId !== sessionId) {
+    const scrollContainer = this.adapter.getScrollContainer();
+    if (!this.currentSessionState || !this.virtualizer || this.currentSessionState.sessionId !== sessionId || !scrollContainer) {
       await this.initializeSession();
       return;
     }
 
     const partialTurns = this.adapter.collectTurnCandidates();
-    const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
-    const mountedCount = this.records.filter((record) => record.mounted).length;
-
-    if (this.virtualizer.getCollapsedGroupCount() > 0 && partialRecords.length <= mountedCount) {
+    if (partialTurns.length === 0) {
       return;
     }
 
-    if (this.virtualizer.getCollapsedGroupCount() > 0 && this.records.length > 0) {
-      await this.runWithoutMutationReindex(async () => {
-        await this.virtualizer?.restoreRange(0, this.records.length - 1);
-        this.records = this.virtualizer?.getRecords() ?? this.records;
-      });
+    const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
+    const mergedRecords = this.mergeVisibleRecords(sessionId, partialRecords);
+
+    if (!mergedRecords) {
+      await this.initializeSession();
+      return;
     }
 
-    await this.initializeSession();
+    await this.applySessionRecords(sessionId, scrollContainer, mergedRecords, this.currentSessionState.windowMode);
   }
 
   private async runWithoutMutationReindex(work: () => Promise<void>): Promise<void> {
@@ -313,6 +300,267 @@ export class SessionController {
         this.observeMutations();
       }
     }
+  }
+
+  private async applySessionRecords(
+    sessionId: string,
+    scrollContainer: HTMLElement,
+    records: QARecord[],
+    windowMode: SessionState['windowMode']
+  ): Promise<void> {
+    this.scrollContainer = scrollContainer;
+    this.records = records;
+    if (this.virtualizer) {
+      void this.virtualizer.persistCollapsedSnapshots();
+      this.virtualizer.dispose();
+    }
+    this.virtualizer = new VirtualizationEngine({
+      config: this.config,
+      logger: this.logger,
+      snapshotStore: this.snapshotStore
+    });
+
+    await this.runWithoutMutationReindex(async () => {
+      await this.virtualizer?.attach(scrollContainer, this.records);
+      if (this.config.enableVirtualization && windowMode === 'auto') {
+        await this.virtualizer?.applyInitialWindow();
+      } else {
+        this.virtualizer?.refreshCollapsedGroups();
+      }
+      this.records = this.virtualizer?.getRecords() ?? this.records;
+    });
+
+    this.currentSessionState = {
+      sessionId,
+      recordIdsInOrder: [],
+      activeWindowStart: 0,
+      activeWindowEnd: 0,
+      totalRecords: this.records.length,
+      fullyIndexed: true,
+      windowMode
+    };
+    this.syncSessionState();
+
+    this.scrollManager?.disconnect();
+    this.scrollManager = new ScrollManager(scrollContainer, {
+      topThresholdPx: this.config.topThresholdPx,
+      onReachTop: () => this.restorePreviousBatch()
+    });
+
+    this.installScrollModeListener(scrollContainer);
+    this.installQuickJumpListener();
+    this.observeMutations();
+    await this.publishStats();
+  }
+
+  private mergeVisibleRecords(sessionId: string, partialRecords: QARecord[]): QARecord[] | null {
+    const mountedIndices = this.records.flatMap((record, index) => (record.mounted ? [index] : []));
+    if (mountedIndices.length === 0) {
+      return partialRecords;
+    }
+
+    if (partialRecords.length < mountedIndices.length) {
+      return null;
+    }
+
+    const firstMountedRecord = this.records[mountedIndices[0]];
+    if (firstMountedRecord && partialRecords[0] && !recordsAreCompatible(firstMountedRecord, partialRecords[0])) {
+      return null;
+    }
+
+    const merged = [...this.records];
+    const replaceCount = Math.min(mountedIndices.length, partialRecords.length);
+
+    for (let index = 0; index < replaceCount; index += 1) {
+      const targetIndex = mountedIndices[index]!;
+      const existing = this.records[targetIndex]!;
+      const partial = partialRecords[index]!;
+      merged[targetIndex] = {
+        ...partial,
+        id: existing.id,
+        index: existing.index,
+        sessionId,
+        protectedUntil: existing.protectedUntil,
+        rootElement: null,
+        detachedRoot: undefined,
+        snapshotHtml: existing.snapshotHtml
+      };
+    }
+
+    for (let index = mountedIndices.length; index < partialRecords.length; index += 1) {
+      const partial = partialRecords[index]!;
+      const recordIndex = merged.length;
+      merged.push({
+        ...partial,
+        id: createRecordId(sessionId, recordIndex),
+        index: recordIndex,
+        sessionId,
+        rootElement: null,
+        detachedRoot: undefined
+      });
+    }
+
+    return merged;
+  }
+
+  private installScrollModeListener(scrollContainer: HTMLElement): void {
+    this.cleanupScrollModeListener?.();
+
+    const onScroll = () => {
+      if (this.currentSessionState?.windowMode !== 'manual-expanded') {
+        return;
+      }
+
+      const distanceFromBottom = scrollContainer.scrollHeight - scrollContainer.clientHeight - scrollContainer.scrollTop;
+      if (distanceFromBottom > this.config.preloadBufferPx) {
+        return;
+      }
+
+      void this.restoreAutoWindowMode();
+    };
+
+    scrollContainer.addEventListener('scroll', onScroll, {
+      passive: true
+    });
+
+    this.cleanupScrollModeListener = () => {
+      scrollContainer.removeEventListener('scroll', onScroll);
+    };
+  }
+
+  private installQuickJumpListener(): void {
+    this.cleanupQuickJumpListener?.();
+    this.cleanupQuickJumpListener = undefined;
+
+    const quickJumpContainer = this.adapter.getQuickJumpContainer?.();
+    if (!quickJumpContainer || !this.adapter.extractQuickJumpText) {
+      return;
+    }
+
+    const onClick = (event: Event) => {
+      const text = this.adapter.extractQuickJumpText?.(event.target);
+      if (!text) {
+        return;
+      }
+
+      const match = this.findQuickJumpMatch(text);
+      if (!match || match.mounted) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void this.restoreRecordContext(match.recordId);
+    };
+
+    quickJumpContainer.addEventListener('click', onClick, true);
+    this.cleanupQuickJumpListener = () => {
+      quickJumpContainer.removeEventListener('click', onClick, true);
+    };
+  }
+
+  private findQuickJumpMatch(rawText: string): { recordId: string; mounted: boolean } | null {
+    const query = normalizeQuickJumpText(rawText);
+    if (query.length < 4) {
+      return null;
+    }
+
+    const matches = this.records
+      .map((record) => ({
+        mounted: record.mounted,
+        recordId: record.id,
+        score: scoreQuickJumpMatch(record, query)
+      }))
+      .filter((match) => match.score > 0)
+      .sort((left, right) => right.score - left.score);
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    const [best, second] = matches;
+    if (!best) {
+      return null;
+    }
+
+    if (best.mounted) {
+      return {
+        recordId: best.recordId,
+        mounted: true
+      };
+    }
+
+    if (best.score < 2 || (second && second.score === best.score)) {
+      return null;
+    }
+
+    return {
+      recordId: best.recordId,
+      mounted: false
+    };
+  }
+
+  private async restoreRecordContext(recordId: string): Promise<void> {
+    if (!this.currentSessionState || !this.scrollContainer || !this.virtualizer) {
+      return;
+    }
+
+    const targetIndex = this.records.findIndex((record) => record.id === recordId);
+    if (targetIndex < 0 || this.records[targetIndex]?.mounted) {
+      return;
+    }
+
+    const start = Math.max(0, targetIndex - this.config.searchContextBefore);
+    const end = Math.min(this.records.length - 1, targetIndex + this.config.searchContextAfter);
+
+    await this.runWithoutMutationReindex(async () => {
+      await this.virtualizer?.restoreRange(start, end);
+      this.records = this.virtualizer?.getRecords() ?? this.records;
+    });
+
+    this.setWindowMode('manual-expanded');
+    this.syncSessionState();
+    this.virtualizer.scrollToRecord(recordId);
+    await this.publishStats();
+  }
+
+  private async restoreAutoWindowMode(): Promise<void> {
+    if (!this.currentSessionState || !this.virtualizer || !this.scrollContainer) {
+      return;
+    }
+
+    if (this.currentSessionState.windowMode !== 'manual-expanded') {
+      return;
+    }
+
+    this.setWindowMode('auto');
+    await this.runWithoutMutationReindex(async () => {
+      await this.virtualizer?.applyWindowPlan();
+      this.records = this.virtualizer?.getRecords() ?? this.records;
+    });
+    this.syncSessionState();
+    this.scrollContainer.scrollTop = this.scrollContainer.scrollHeight;
+    await this.publishStats();
+  }
+
+  private setWindowMode(windowMode: SessionState['windowMode']): void {
+    if (!this.currentSessionState) {
+      return;
+    }
+
+    this.currentSessionState.windowMode = windowMode;
+  }
+
+  private syncSessionState(): void {
+    if (!this.currentSessionState) {
+      return;
+    }
+
+    const mountedIndices = this.records.flatMap((record, index) => (record.mounted ? [index] : []));
+    this.currentSessionState.recordIdsInOrder = this.records.map((record) => record.id);
+    this.currentSessionState.activeWindowStart = mountedIndices[0] ?? 0;
+    this.currentSessionState.activeWindowEnd = mountedIndices.at(-1) ?? Math.max(this.records.length - 1, 0);
+    this.currentSessionState.totalRecords = this.records.length;
   }
 
   private readonly handleRuntimeMessage = (
@@ -349,16 +597,67 @@ export class SessionController {
   }
 }
 
+function normalizeQuickJumpText(value: string): string {
+  return value.replace(/[.…]+$/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function scoreQuickJumpMatch(record: QARecord, query: string): number {
+  const normalizedUser = normalizeQuickJumpRecordText(record.textUser);
+  const normalizedCombined = normalizeQuickJumpRecordText(record.textCombined);
+
+  if (normalizedUser === query) {
+    return 6;
+  }
+
+  if (normalizedCombined === query) {
+    return 5;
+  }
+
+  if (normalizedUser.startsWith(query)) {
+    return 4;
+  }
+
+  if (normalizedUser.includes(query)) {
+    return 3;
+  }
+
+  if (normalizedCombined.startsWith(query)) {
+    return 2;
+  }
+
+  if (normalizedCombined.includes(query)) {
+    return 1;
+  }
+
+  return 0;
+}
+
+function recordsAreCompatible(left: QARecord, right: QARecord): boolean {
+  return normalizeQuickJumpRecordText(left.textUser) === normalizeQuickJumpRecordText(right.textUser);
+}
+
+function normalizeQuickJumpRecordText(value: string): string {
+  return normalizeQuickJumpText(value).replace(/^(you said:|chatgpt said:|assistant:|user:)\s*/i, '');
+}
+
 function isRelevantTurnMutation(mutation: MutationRecord): boolean {
+  if (mutation.type === 'attributes') {
+    return hasRelevantTurnTarget(mutation.target);
+  }
+
   return hasRelevantTurnNode(mutation.addedNodes) || hasRelevantTurnNode(mutation.removedNodes);
 }
 
 function hasRelevantTurnNode(nodes: NodeList): boolean {
   return Array.from(nodes).some((node) => {
-    if (!(node instanceof HTMLElement)) {
-      return false;
-    }
-
-    return node.matches(CHATGPT_TURN_SELECTORS) || node.querySelector(CHATGPT_TURN_SELECTORS) !== null;
+    return hasRelevantTurnTarget(node);
   });
+}
+
+function hasRelevantTurnTarget(node: Node | null): boolean {
+  if (!(node instanceof HTMLElement)) {
+    return false;
+  }
+
+  return node.matches(CHATGPT_TURN_SELECTORS) || node.querySelector(CHATGPT_TURN_SELECTORS) !== null;
 }

@@ -1,16 +1,15 @@
 import type { ExtensionConfig, QARecord, RestoreRange, SessionState, WindowPlan } from '@/shared/contracts';
 
 export function computeWindowPlan(records: QARecord[], config: ExtensionConfig, now: number): WindowPlan {
-  const preferredStart = Math.max(records.length - config.windowSizeQa, 0);
-  const protectedIds = new Set(
+  const protectedIds = new Set(records.filter((record) => isProtectedRecord(record, now)).map((record) => record.id));
+  const preferredTailIds = new Set(
     records
-      .filter((record) => record.generating || (record.protectedUntil !== undefined && record.protectedUntil > now))
+      .filter((record) => !isProtectedRecord(record, now))
+      .slice(-config.windowSizeQa)
       .map((record) => record.id)
   );
 
-  const mountRecordIds = records
-    .filter((record, index) => index >= preferredStart || protectedIds.has(record.id))
-    .map((record) => record.id);
+  const mountRecordIds = records.filter((record) => preferredTailIds.has(record.id) || protectedIds.has(record.id)).map((record) => record.id);
 
   const mountSet = new Set(mountRecordIds);
 
@@ -22,6 +21,10 @@ export function computeWindowPlan(records: QARecord[], config: ExtensionConfig, 
     mountRecordIds,
     evictRecordIds
   };
+}
+
+function isProtectedRecord(record: QARecord, now: number): boolean {
+  return record.generating || (record.protectedUntil !== undefined && record.protectedUntil > now);
 }
 
 export function getTopRestoreRange(

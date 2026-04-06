@@ -42,6 +42,7 @@ export interface SessionState {
   activeWindowEnd: number;
   totalRecords: number;
   fullyIndexed: boolean;
+  windowMode: 'auto' | 'manual-expanded';
 }
 
 export interface SearchHit {
@@ -95,6 +96,8 @@ export interface PageAdapter {
   collectTurnCandidates(): TurnCandidate[];
   observeSessionChanges(callback: () => void): () => void;
   getConfidence(): number;
+  getQuickJumpContainer?(): HTMLElement | null;
+  extractQuickJumpText?(target: EventTarget | null): string | null;
 }
 
 export interface SnapshotStore {

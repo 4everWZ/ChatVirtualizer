@@ -14,7 +14,10 @@
 - Detect supported ChatGPT chat pages and derive a per-session ID
 - Group DOM turns into logical QA records
 - Keep the latest QA window mounted and collapse older records into compact grouped folds
+- Auto-compress the same conversation back to the latest 10 stable QA records as new turns arrive, without requiring a page refresh
+- Preserve manually restored older history until the user returns near the bottom of the conversation
 - Restore older history when the user reaches the top of the chat container
+- Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
 - Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
 - Expose popup stats and options for runtime configuration
 - Degrade safely when the page structure is unsupported

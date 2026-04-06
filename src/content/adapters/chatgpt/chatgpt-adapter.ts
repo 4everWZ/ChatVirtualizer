@@ -18,6 +18,7 @@ export const CHATGPT_TURN_SELECTORS = [
 ].join(', ');
 
 const DIRECT_SCROLL_SELECTORS = ['[data-scroll-root]', '[data-ecv-scroll-container]', '[data-testid="conversation-turns"]'].join(', ');
+const QUICK_JUMP_CONTAINER_SELECTOR = '.fixed.end-4.top-1\\/2.z-20.-translate-y-1\\/2';
 const LOCATION_CHANGE_EVENT = 'ecv:locationchange';
 const HISTORY_PATCH_STATE_KEY = '__ecvHistoryPatchState__';
 
@@ -142,6 +143,19 @@ export class ChatGptPageAdapter implements PageAdapter {
     }
 
     return confidence;
+  }
+
+  getQuickJumpContainer(): HTMLElement | null {
+    return this.rootDocument.querySelector<HTMLElement>(QUICK_JUMP_CONTAINER_SELECTOR);
+  }
+
+  extractQuickJumpText(target: EventTarget | null): string | null {
+    if (!(target instanceof HTMLElement)) {
+      return null;
+    }
+
+    const item = target.closest<HTMLElement>('button, a, [role="button"], [data-quick-jump-item]');
+    return item?.textContent?.replace(/\s+/g, ' ').trim() || null;
   }
 
   private collectTurnCandidatesInternal(scrollContainer: HTMLElement | null): HTMLElement[] {

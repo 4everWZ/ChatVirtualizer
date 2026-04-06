@@ -32,7 +32,8 @@ describe('window manager', () => {
     expect(plan.mountRecordIds).toContain('record-1');
     expect(plan.mountRecordIds).toContain('record-13');
     expect(plan.evictRecordIds).toContain('record-0');
-    expect(plan.mountRecordIds).toHaveLength(11);
+    expect(plan.evictRecordIds).toContain('record-2');
+    expect(plan.mountRecordIds).toHaveLength(12);
   });
 
   test('restores the previous batch when the user reaches the top', () => {

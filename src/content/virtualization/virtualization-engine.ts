@@ -76,6 +76,17 @@ export class VirtualizationEngine {
     this.renderCollapsedGroups();
   }
 
+  refreshCollapsedGroups(): void {
+    this.renderCollapsedGroups();
+  }
+
+  dispose(): void {
+    for (const group of this.collapsedGroups) {
+      group.element.remove();
+    }
+    this.collapsedGroups = [];
+  }
+
   protectRange(start: number, end: number, ttlMs: number): void {
     const protectedUntil = Date.now() + ttlMs;
     for (const record of this.records.slice(start, end + 1)) {
