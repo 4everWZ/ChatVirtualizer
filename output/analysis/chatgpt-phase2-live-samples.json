@@ -1,0 +1,121 @@
+{
+  "url": "https://chatgpt.com/c/69d9fca2-9a14-839a-934f-2a0aacdd6ebf",
+  "samples": [
+    {
+      "index": 1,
+      "allNodes": 10729,
+      "buttons": 114,
+      "codeBlocks": 207,
+      "selectorCounts": {
+        "ecvRecordRoots": 10,
+        "ecvLiveRoots": 4,
+        "ecvLiteRoots": 6,
+        "ecvCollapsedGroups": 1,
+        "liveTurns": 20
+      },
+      "mountedIndices": [
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "scrollHeight": 87003,
+      "perfMemory": {
+        "usedJSHeapSize": 225250234,
+        "totalJSHeapSize": 285404210,
+        "jsHeapSizeLimit": 4294967296
+      },
+      "longTaskCount": 20,
+      "longTaskTotalMs": 9301,
+      "longTaskMaxMs": 2570
+    },
+    {
+      "index": 2,
+      "allNodes": 10727,
+      "buttons": 114,
+      "codeBlocks": 207,
+      "selectorCounts": {
+        "ecvRecordRoots": 10,
+        "ecvLiveRoots": 4,
+        "ecvLiteRoots": 6,
+        "ecvCollapsedGroups": 1,
+        "liveTurns": 20
+      },
+      "mountedIndices": [
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "scrollHeight": 87003,
+      "perfMemory": {
+        "usedJSHeapSize": 202646826,
+        "totalJSHeapSize": 260383002,
+        "jsHeapSizeLimit": 4294967296
+      },
+      "longTaskCount": 19,
+      "longTaskTotalMs": 11791,
+      "longTaskMaxMs": 3337
+    },
+    {
+      "index": 3,
+      "allNodes": 10722,
+      "buttons": 114,
+      "codeBlocks": 207,
+      "selectorCounts": {
+        "ecvRecordRoots": 10,
+        "ecvLiveRoots": 4,
+        "ecvLiteRoots": 6,
+        "ecvCollapsedGroups": 1,
+        "liveTurns": 20
+      },
+      "mountedIndices": [
+        22,
+        23,
+        24,
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+        31
+      ],
+      "scrollHeight": 87003,
+      "perfMemory": {
+        "usedJSHeapSize": 239766068,
+        "totalJSHeapSize": 290379024,
+        "jsHeapSizeLimit": 4294967296
+      },
+      "longTaskCount": 18,
+      "longTaskTotalMs": 8730,
+      "longTaskMaxMs": 2361
+    }
+  ],
+  "average": {
+    "allNodes": 10726,
+    "buttons": 114,
+    "codeBlocks": 207,
+    "liveRoots": 4,
+    "liteRoots": 6,
+    "collapsedGroups": 1,
+    "liveTurns": 20,
+    "scrollHeight": 87003,
+    "longTaskCount": 19,
+    "longTaskTotalMs": 9940.666666666666,
+    "longTaskMaxMs": 2756,
+    "usedJSHeapSize": 222554376
+  }
+}

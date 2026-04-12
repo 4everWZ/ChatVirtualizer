@@ -14,7 +14,9 @@
 - Detect supported ChatGPT chat pages and derive a per-session ID
 - Group DOM turns into logical QA records
 - Keep the latest QA window mounted and collapse older records into compact grouped folds
+- Split the mounted QA window into a lightweight reading subset plus a small hot live subset, so the newest four records keep full ChatGPT DOM while older visible records are downgraded to lighter reading-state wrappers
 - Auto-compress the same conversation back to the latest 10 stable QA records as new turns arrive, without requiring a page refresh
+- Ignore transient mid-thread hydration busy markers so historical assistant messages do not get pinned in the mounted window
 - Preserve manually restored older history until the user returns near the bottom of the conversation
 - Restore older history when the user reaches the top of the chat container
 - Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
@@ -23,6 +25,8 @@
 - Expose popup stats and options for runtime configuration
 - Degrade safely when the page structure is unsupported
 - Stay event-driven end to end; no timer polling, busy waits, or CPU spin loops are allowed in runtime behavior
+- Use a short first-pass activation quiet window for live ChatGPT bootstrap, while keeping `stabilityQuietMs` for steady-state reindex debounce
+- Keep an internal `bootstrapping -> steady` phase so long threads can pressure-relieve early without introducing polling
 
 ## Default Configuration
 
@@ -149,4 +153,5 @@ The current repository is wired to verify through:
 - Native browser find support is current-session only
 - Snapshot restore targets reading fidelity, not full site-internal component behavior parity
 - Released collapsed history restores as lightweight reading-state DOM, so old turn toolbars and similar interaction chrome are intentionally not preserved
+- Older visible records inside the mounted window also use lightweight reading-state DOM, so only the hottest subset keeps full ChatGPT turn chrome by default
 - The fixture browser suite verifies popup stats and native-find restore behavior; real signed-in ChatGPT validation is still an explicit optional step

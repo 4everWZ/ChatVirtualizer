@@ -17,6 +17,8 @@ interface SessionControllerOptions {
   snapshotStore?: IndexedDbSnapshotStore;
 }
 
+const INITIAL_ACTIVATION_QUIET_MS = 250;
+
 export class SessionController {
   private readonly adapter: PageAdapter;
   private readonly configStore: ConfigStore;
@@ -37,6 +39,7 @@ export class SessionController {
   private cleanupQuickJumpListener?: () => void;
   private cleanupScrollModeListener?: () => void;
   private reindexTimer?: number;
+  private phaseSettleTimer?: number;
   private virtualizer?: VirtualizationEngine;
 
   constructor(options: SessionControllerOptions = {}) {
@@ -81,6 +84,8 @@ export class SessionController {
       this.reindexTimer = undefined;
     }
 
+    this.clearPhaseSettleTimer();
+
     if (this.initializationTimer !== undefined) {
       clearTimeout(this.initializationTimer);
       this.initializationTimer = undefined;
@@ -114,7 +119,7 @@ export class SessionController {
     }
 
     this.armActivationWatcher();
-    this.scheduleInitialization();
+    this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS);
   }
 
   private async initializeSession(): Promise<void> {
@@ -137,7 +142,12 @@ export class SessionController {
 
     this.records = buildQaRecordsFromTurns(turns, sessionId);
 
-    await this.applySessionRecords(sessionId, scrollContainer, this.records, this.currentSessionState?.windowMode ?? 'auto');
+    const phase =
+      this.currentSessionState?.sessionId === sessionId
+        ? this.currentSessionState.phase
+        : 'bootstrapping';
+
+    await this.applySessionRecords(sessionId, scrollContainer, this.records, this.currentSessionState?.windowMode ?? 'auto', phase);
   }
 
   private armActivationWatcher(): void {
@@ -164,6 +174,7 @@ export class SessionController {
 
   private resetSessionState(): void {
     this.clearInitializationTimer();
+    this.clearPhaseSettleTimer();
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
     this.scrollManager?.disconnect();
@@ -192,13 +203,13 @@ export class SessionController {
     });
   }
 
-  private scheduleInitialization(): void {
+  private scheduleInitialization(quietMs: number): void {
     this.clearInitializationTimer();
     this.initializationTimer = window.setTimeout(() => {
       this.initializationTimer = undefined;
       this.disarmActivationWatcher();
       void this.initializeSession();
-    }, this.config.stabilityQuietMs);
+    }, quietMs);
   }
 
   private clearInitializationTimer(): void {
@@ -229,9 +240,15 @@ export class SessionController {
         clearTimeout(this.reindexTimer);
       }
 
+      const quietMs = this.currentSessionState?.phase === 'bootstrapping' ? INITIAL_ACTIVATION_QUIET_MS : this.config.stabilityQuietMs;
       this.reindexTimer = window.setTimeout(() => {
+        this.reindexTimer = undefined;
         void this.reindexSession();
-      }, this.config.stabilityQuietMs);
+      }, quietMs);
+
+      if (this.currentSessionState?.phase === 'bootstrapping') {
+        this.armSteadyPhaseTimer();
+      }
     });
 
     this.mutationObserver.observe(this.scrollContainer, {
@@ -285,7 +302,7 @@ export class SessionController {
       return;
     }
 
-    await this.applySessionRecords(sessionId, scrollContainer, mergedRecords, this.currentSessionState.windowMode);
+    await this.applySessionRecords(sessionId, scrollContainer, mergedRecords, this.currentSessionState.windowMode, this.currentSessionState.phase);
   }
 
   private async runWithoutMutationReindex(work: () => Promise<void>): Promise<void> {
@@ -306,7 +323,8 @@ export class SessionController {
     sessionId: string,
     scrollContainer: HTMLElement,
     records: QARecord[],
-    windowMode: SessionState['windowMode']
+    windowMode: SessionState['windowMode'],
+    phase: SessionState['phase']
   ): Promise<void> {
     this.scrollContainer = scrollContainer;
     this.records = records;
@@ -337,9 +355,17 @@ export class SessionController {
       activeWindowEnd: 0,
       totalRecords: this.records.length,
       fullyIndexed: true,
-      windowMode
+      windowMode,
+      phase
     };
     this.syncSessionState();
+    if (phase === 'bootstrapping') {
+      if (this.phaseSettleTimer === undefined) {
+        this.armSteadyPhaseTimer();
+      }
+    } else {
+      this.clearPhaseSettleTimer();
+    }
 
     this.scrollManager?.disconnect();
     this.scrollManager = new ScrollManager(scrollContainer, {
@@ -354,25 +380,20 @@ export class SessionController {
   }
 
   private mergeVisibleRecords(sessionId: string, partialRecords: QARecord[]): QARecord[] | null {
-    const mountedIndices = this.records.flatMap((record, index) => (record.mounted ? [index] : []));
-    if (mountedIndices.length === 0) {
+    if (this.records.length === 0) {
       return partialRecords;
     }
 
-    if (partialRecords.length < mountedIndices.length) {
-      return null;
-    }
-
-    const firstMountedRecord = this.records[mountedIndices[0]];
-    if (firstMountedRecord && partialRecords[0] && !recordsAreCompatible(firstMountedRecord, partialRecords[0])) {
+    const overlap = findSuffixPrefixOverlap(this.records, partialRecords);
+    if (overlap < 0) {
       return null;
     }
 
     const merged = [...this.records];
-    const replaceCount = Math.min(mountedIndices.length, partialRecords.length);
+    const overlapStart = this.records.length - overlap;
 
-    for (let index = 0; index < replaceCount; index += 1) {
-      const targetIndex = mountedIndices[index]!;
+    for (let index = 0; index < overlap; index += 1) {
+      const targetIndex = overlapStart + index;
       const existing = this.records[targetIndex]!;
       const partial = partialRecords[index]!;
       merged[targetIndex] = {
@@ -380,14 +401,17 @@ export class SessionController {
         id: existing.id,
         index: existing.index,
         sessionId,
+        mounted: existing.mounted,
+        renderMode: existing.renderMode,
         protectedUntil: existing.protectedUntil,
         rootElement: null,
-        detachedRoot: undefined,
+        detachedRoot: existing.detachedRoot,
+        liveRootCache: existing.liveRootCache,
         snapshotHtml: existing.snapshotHtml
       };
     }
 
-    for (let index = mountedIndices.length; index < partialRecords.length; index += 1) {
+    for (let index = overlap; index < partialRecords.length; index += 1) {
       const partial = partialRecords[index]!;
       const recordIndex = merged.length;
       merged.push({
@@ -396,7 +420,8 @@ export class SessionController {
         index: recordIndex,
         sessionId,
         rootElement: null,
-        detachedRoot: undefined
+        detachedRoot: undefined,
+        liveRootCache: undefined
       });
     }
 
@@ -512,9 +537,12 @@ export class SessionController {
 
     const start = Math.max(0, targetIndex - this.config.searchContextBefore);
     const end = Math.min(this.records.length - 1, targetIndex + this.config.searchContextAfter);
+    this.virtualizer?.clearForcedLiveRecordIds();
 
     await this.runWithoutMutationReindex(async () => {
-      await this.virtualizer?.restoreRange(start, end);
+      await this.virtualizer?.restoreRange(start, end, {
+        forceLiveRecordIds: this.records.slice(start, end + 1).map((record) => record.id)
+      });
       this.records = this.virtualizer?.getRecords() ?? this.records;
     });
 
@@ -534,6 +562,7 @@ export class SessionController {
     }
 
     this.setWindowMode('auto');
+    this.virtualizer.clearForcedLiveRecordIds();
     await this.runWithoutMutationReindex(async () => {
       await this.virtualizer?.applyWindowPlan();
       this.records = this.virtualizer?.getRecords() ?? this.records;
@@ -549,6 +578,31 @@ export class SessionController {
     }
 
     this.currentSessionState.windowMode = windowMode;
+  }
+
+  private armSteadyPhaseTimer(): void {
+    this.clearPhaseSettleTimer();
+    if (!this.currentSessionState || this.currentSessionState.phase !== 'bootstrapping') {
+      return;
+    }
+
+    this.phaseSettleTimer = window.setTimeout(() => {
+      this.phaseSettleTimer = undefined;
+      if (!this.currentSessionState || this.currentSessionState.phase !== 'bootstrapping') {
+        return;
+      }
+
+      this.currentSessionState.phase = 'steady';
+    }, this.config.stabilityQuietMs);
+  }
+
+  private clearPhaseSettleTimer(): void {
+    if (this.phaseSettleTimer === undefined) {
+      return;
+    }
+
+    clearTimeout(this.phaseSettleTimer);
+    this.phaseSettleTimer = undefined;
   }
 
   private syncSessionState(): void {
@@ -636,6 +690,29 @@ function recordsAreCompatible(left: QARecord, right: QARecord): boolean {
   return normalizeQuickJumpRecordText(left.textUser) === normalizeQuickJumpRecordText(right.textUser);
 }
 
+function findSuffixPrefixOverlap(existingRecords: QARecord[], partialRecords: QARecord[]): number {
+  const maxOverlap = Math.min(existingRecords.length, partialRecords.length);
+
+  for (let overlap = maxOverlap; overlap >= 0; overlap -= 1) {
+    let matches = true;
+
+    for (let index = 0; index < overlap; index += 1) {
+      const left = existingRecords[existingRecords.length - overlap + index];
+      const right = partialRecords[index];
+      if (!left || !right || !recordsAreCompatible(left, right)) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      return overlap;
+    }
+  }
+
+  return -1;
+}
+
 function normalizeQuickJumpRecordText(value: string): string {
   return normalizeQuickJumpText(value).replace(/^(you said:|chatgpt said:|assistant:|user:)\s*/i, '');
 }
@@ -645,7 +722,7 @@ function isRelevantTurnMutation(mutation: MutationRecord): boolean {
     return hasRelevantTurnTarget(mutation.target);
   }
 
-  return hasRelevantTurnNode(mutation.addedNodes) || hasRelevantTurnNode(mutation.removedNodes);
+  return hasRelevantTurnTarget(mutation.target) || hasRelevantTurnNode(mutation.addedNodes) || hasRelevantTurnNode(mutation.removedNodes);
 }
 
 function hasRelevantTurnNode(nodes: NodeList): boolean {
@@ -655,9 +732,9 @@ function hasRelevantTurnNode(nodes: NodeList): boolean {
 }
 
 function hasRelevantTurnTarget(node: Node | null): boolean {
-  if (!(node instanceof HTMLElement)) {
+  if (!(node instanceof Element)) {
     return false;
   }
 
-  return node.matches(CHATGPT_TURN_SELECTORS) || node.querySelector(CHATGPT_TURN_SELECTORS) !== null;
+  return node.matches(CHATGPT_TURN_SELECTORS) || node.closest(CHATGPT_TURN_SELECTORS) !== null || node.querySelector(CHATGPT_TURN_SELECTORS) !== null;
 }

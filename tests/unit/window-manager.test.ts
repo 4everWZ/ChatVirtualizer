@@ -14,6 +14,7 @@ function record(index: number, overrides: Partial<QARecord> = {}): QARecord {
     textCombined: `Question ${index} Answer ${index}`,
     height: 120,
     mounted: true,
+    renderMode: 'live',
     stable: true,
     generating: false,
     protectedUntil: undefined,

@@ -8,6 +8,93 @@ import { vi } from 'vitest';
 import { installFixtureDom } from '../helpers/fixture-dom';
 
 describe('virtualization engine', () => {
+  test('keeps only the newest four mounted records live and renders the older visible window as lite-readable content', async () => {
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    for (const assistantTurn of document.querySelectorAll<HTMLElement>('section[data-turn="assistant"]')) {
+      assistantTurn.append(
+        createHeavyAction('copy-turn-action-button', 'Copy'),
+        createHeavyAction('good-response-turn-action-button', 'Good'),
+        createHeavyAction('bad-response-turn-action-button', 'Bad'),
+        createCitationPill()
+      );
+    }
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore: new IndexedDbSnapshotStore('ecv-virtualizer-lite-window-test')
+    });
+
+    await engine.attach(scrollContainer, records);
+    await engine.applyInitialWindow();
+
+    const liveRoots = Array.from(scrollContainer.querySelectorAll<HTMLElement>('.ecv-record-root[data-render-mode="live"]'));
+    const liteRoots = Array.from(scrollContainer.querySelectorAll<HTMLElement>('.ecv-record-root[data-render-mode="lite"]'));
+
+    expect(liveRoots.map((element) => Number(element.dataset.recordIndex))).toEqual([8, 9, 10, 11]);
+    expect(liteRoots.map((element) => Number(element.dataset.recordIndex))).toEqual([2, 3, 4, 5, 6, 7]);
+    expect(scrollContainer.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+
+    expect(liveRoots[0]?.querySelector('[data-testid="copy-turn-action-button"]')).not.toBeNull();
+    expect(liveRoots[0]?.querySelector('[data-testid="webpage-citation-pill"]')).not.toBeNull();
+    expect(liteRoots[0]?.querySelector('[data-testid="copy-turn-action-button"]')).toBeNull();
+    expect(liteRoots[0]?.querySelector('[data-testid="webpage-citation-pill"]')).toBeNull();
+  });
+
+  test('promotes interacted lite records to live and demotes the oldest unprotected live record back to lite', async () => {
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    for (const assistantTurn of document.querySelectorAll<HTMLElement>('section[data-turn="assistant"]')) {
+      assistantTurn.append(createHeavyAction('copy-turn-action-button', 'Copy'));
+    }
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: DEFAULT_CONFIG,
+      snapshotStore: new IndexedDbSnapshotStore('ecv-virtualizer-live-promotion-test')
+    });
+
+    await engine.attach(scrollContainer, records);
+    await engine.applyInitialWindow();
+
+    const promotedRoot = scrollContainer.querySelector<HTMLElement>('.ecv-record-root[data-record-index="5"]');
+    if (!promotedRoot) {
+      throw new Error('expected record 5 to be mounted as lite');
+    }
+
+    promotedRoot.dispatchEvent(
+      new PointerEvent('pointerenter', {
+        bubbles: true
+      })
+    );
+    await Promise.resolve();
+
+    const liveIndices = Array.from(scrollContainer.querySelectorAll<HTMLElement>('.ecv-record-root[data-render-mode="live"]')).map((element) =>
+      Number(element.dataset.recordIndex)
+    );
+    const liteIndices = Array.from(scrollContainer.querySelectorAll<HTMLElement>('.ecv-record-root[data-render-mode="lite"]')).map((element) =>
+      Number(element.dataset.recordIndex)
+    );
+
+    expect(liveIndices).toEqual([5, 9, 10, 11]);
+    expect(liteIndices).toContain(8);
+    expect(scrollContainer.querySelector<HTMLElement>('.ecv-record-root[data-record-index="5"] [data-testid="copy-turn-action-button"]')).not.toBeNull();
+    expect(scrollContainer.querySelector<HTMLElement>('.ecv-record-root[data-record-index="8"] [data-testid="copy-turn-action-button"]')).toBeNull();
+  });
+
   test('compresses older records into collapsed groups and restores them from native find hooks', async () => {
     installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
 

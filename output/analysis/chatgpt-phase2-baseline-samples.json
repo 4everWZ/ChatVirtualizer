@@ -1,0 +1,52 @@
+{
+  "url": "https://chatgpt.com/c/69d9fca2-9a14-839a-934f-2a0aacdd6ebf",
+  "samples": [
+    {
+      "index": 1,
+      "allNodes": 27872,
+      "buttons": 486,
+      "codeBlocks": 714,
+      "selectorCounts": {
+        "liveTurns": 64
+      },
+      "scrollHeight": 253411,
+      "perfMemory": {
+        "usedJSHeapSize": 197965317,
+        "totalJSHeapSize": 252714085,
+        "jsHeapSizeLimit": 4294967296
+      },
+      "longTaskCount": 20,
+      "longTaskTotalMs": 7362,
+      "longTaskMaxMs": 2597
+    },
+    {
+      "index": 2,
+      "allNodes": 27852,
+      "buttons": 487,
+      "codeBlocks": 714,
+      "selectorCounts": {
+        "liveTurns": 64
+      },
+      "scrollHeight": 253181,
+      "perfMemory": {
+        "usedJSHeapSize": 233772915,
+        "totalJSHeapSize": 282099567,
+        "jsHeapSizeLimit": 4294967296
+      },
+      "longTaskCount": 25,
+      "longTaskTotalMs": 7317,
+      "longTaskMaxMs": 2404
+    }
+  ],
+  "average": {
+    "allNodes": 27862,
+    "buttons": 486.5,
+    "codeBlocks": 714,
+    "liveTurns": 64,
+    "scrollHeight": 253296,
+    "longTaskCount": 22.5,
+    "longTaskTotalMs": 7339.5,
+    "longTaskMaxMs": 2500.5,
+    "usedJSHeapSize": 215869116
+  }
+}

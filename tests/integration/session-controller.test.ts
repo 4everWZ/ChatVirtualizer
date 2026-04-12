@@ -187,7 +187,10 @@ class DynamicChatGptAdapter implements PageAdapter {
       role: element.dataset.turn as TurnRole,
       text: element.textContent?.trim() ?? '',
       element,
-      generating: element.dataset.generating === 'true'
+      generating:
+        element.dataset.generating === 'true' ||
+        element.getAttribute('aria-busy') === 'true' ||
+        element.querySelector('[aria-busy="true"], [data-writing-block]') !== null
     }));
   }
 
@@ -230,6 +233,26 @@ class DynamicChatGptAdapter implements PageAdapter {
     this.thread.append(createTurn(`conversation-turn-${userIndex}`, `turn-${userIndex}`, 'user', 'You said:', question), assistant);
   }
 
+  markAssistantHydrating(recordIndex: number): void {
+    const assistant = this.getAssistantTurnByRecordIndex(recordIndex);
+    assistant.setAttribute('aria-busy', 'true');
+  }
+
+  appendDescendantBusyToAssistant(recordIndex: number): void {
+    const assistant = this.getAssistantTurnByRecordIndex(recordIndex);
+    const busy = document.createElement('div');
+    busy.dataset.writingBlock = 'true';
+    busy.setAttribute('aria-busy', 'true');
+    busy.textContent = 'Hydrating';
+    assistant.append(busy);
+  }
+
+  clearAssistantBusy(recordIndex: number): void {
+    const assistant = this.getAssistantTurnByRecordIndex(recordIndex);
+    assistant.removeAttribute('aria-busy');
+    assistant.querySelectorAll('[aria-busy="true"], [data-writing-block]').forEach((node) => node.remove());
+  }
+
   finishLatestAssistant(finalAnswer: string): void {
     const assistant = Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-turn="assistant"]')).at(-1);
     if (!assistant) {
@@ -261,6 +284,15 @@ class DynamicChatGptAdapter implements PageAdapter {
     button.textContent = label;
     this.quickJumpContainer.append(button);
   }
+
+  private getAssistantTurnByRecordIndex(recordIndex: number): HTMLElement {
+    const assistant = Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-turn="assistant"]'))[recordIndex];
+    if (!assistant) {
+      throw new Error(`missing assistant turn for record ${recordIndex}`);
+    }
+
+    return assistant;
+  }
 }
 
 describe('session controller', () => {
@@ -290,6 +322,40 @@ describe('session controller', () => {
     } finally {
       controller.stop();
       setIntervalSpy.mockRestore();
+    }
+  });
+
+  test('uses a short first-pass activation quiet window instead of waiting for the full reindex debounce', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+
+    const adapter = new DelayedChatGptAdapter();
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      })
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+
+      adapter.mountConversation();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(2);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(2);
+      });
+
+      await startPromise;
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
     }
   });
 
@@ -352,11 +418,11 @@ describe('session controller', () => {
 
       adapter.appendFollowUpTurns();
       await Promise.resolve();
-      await vi.advanceTimersByTimeAsync(10);
+      await vi.advanceTimersByTimeAsync(100);
 
       expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
 
-      await vi.advanceTimersByTimeAsync(20);
+      await vi.advanceTimersByTimeAsync(200);
       await startPromise;
 
       await vi.waitFor(() => {
@@ -445,6 +511,86 @@ describe('session controller', () => {
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
       });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('pressure-relieves a bootstrapping thread once it grows past the window without waiting for the full steady debounce', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new DynamicChatGptAdapter(1);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-bootstrap-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(1);
+        expect(controller.getStats().mountedCount).toBe(1);
+      });
+
+      for (let index = 2; index <= 12; index += 1) {
+        adapter.appendQa(`Question ${index}`, `Answer ${index}`);
+      }
+
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(400);
+
+      expect(controller.getStats().totalRecords).toBe(12);
+      expect(controller.getStats().mountedCount).toBe(10);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      expect((controller as unknown as { currentSessionState?: { phase?: string } }).currentSessionState?.phase).toBe('bootstrapping');
+
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect((controller as unknown as { currentSessionState?: { phase?: string } }).currentSessionState?.phase).toBe('steady');
+      await startPromise;
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('ignores historical hydrate-busy assistant turns when computing the auto window', async () => {
+    document.body.innerHTML = '';
+    const adapter = new DynamicChatGptAdapter(12);
+    adapter.markAssistantHydrating(0);
+    adapter.markAssistantHydrating(2);
+
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-hydrate-busy-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(12);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      const mountedIndices = Array.from(document.querySelectorAll<HTMLElement>('.ecv-record-root')).map((element) =>
+        Number(element.dataset.recordIndex)
+      );
+      expect(mountedIndices).toEqual([2, 3, 4, 5, 6, 7, 8, 9, 10, 11]);
     } finally {
       controller.stop();
     }
@@ -570,6 +716,45 @@ describe('session controller', () => {
       });
 
       adapter.finishLatestAssistant('Answer 11');
+      await vi.waitFor(() => {
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('reindexes when busy descendants inside an existing turn settle and re-compresses without refresh', async () => {
+    document.body.innerHTML = '';
+    const adapter = new DynamicChatGptAdapter(10);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-descendant-busy-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.appendQa('Question 11', 'Answer 11');
+      adapter.appendDescendantBusyToAssistant(10);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(11);
+        expect(controller.getStats().mountedCount).toBe(11);
+      });
+
+      adapter.clearAssistantBusy(10);
+
       await vi.waitFor(() => {
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);

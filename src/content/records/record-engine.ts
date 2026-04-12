@@ -25,8 +25,9 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
         textCombined: normalizeText(turn.text),
         height: estimateHeight([turn.element]),
         mounted: true,
+        renderMode: 'live',
         stable: false,
-        generating: Boolean(turn.generating),
+        generating: isTurnBusy(turn),
         anchorSignature: createAnchorSignature(turn.text),
         elements: [turn.element],
         rootElement: null
@@ -46,6 +47,7 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
         textCombined: '',
         height: 0,
         mounted: true,
+        renderMode: 'live',
         stable: false,
         generating: false,
         anchorSignature: createAnchorSignature(turn.text),
@@ -57,7 +59,7 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
     current.assistantTurnIds.push(turn.id);
     current.textAssistant = joinText(current.textAssistant, turn.text);
     current.textCombined = joinText(current.textCombined, turn.text);
-    current.generating = current.generating || Boolean(turn.generating);
+    current.generating = current.generating || isTurnBusy(turn);
     current.elements?.push(turn.element);
     current.height = estimateHeight(current.elements ?? []);
     current.anchorSignature = current.anchorSignature || createAnchorSignature(current.textCombined);
@@ -67,6 +69,8 @@ export function buildQaRecordsFromTurns(turns: TurnCandidate[], sessionId: strin
     finalizeRecord(current);
     records.push(current);
   }
+
+  normalizeTailGeneration(records);
 
   return records;
 }
@@ -98,4 +102,42 @@ function estimateHeight(elements: HTMLElement[]): number {
 
 function createAnchorSignature(text: string): string {
   return normalizeText(text).slice(0, 80).toLowerCase();
+}
+
+function isTurnBusy(turn: TurnCandidate): boolean {
+  return turn.busySignal !== undefined ? turn.busySignal !== 'none' : Boolean(turn.generating);
+}
+
+function normalizeTailGeneration(records: QARecord[]): void {
+  if (records.length === 0) {
+    return;
+  }
+
+  let activeTailStart = records.length;
+
+  for (let index = records.length - 1; index >= 0; index -= 1) {
+    const record = records[index];
+    if (!record) {
+      continue;
+    }
+
+    const isTailUserOnly = index === records.length - 1 && record.assistantTurnIds.length === 0;
+    if (!record.generating && !isTailUserOnly) {
+      break;
+    }
+
+    activeTailStart = index;
+  }
+
+  const hasTailGenerating = records.slice(activeTailStart).some((record) => record.generating);
+
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    if (!record) {
+      continue;
+    }
+
+    record.generating = hasTailGenerating && index >= activeTailStart && record.generating;
+    record.stable = record.assistantTurnIds.length > 0 && !record.generating;
+  }
 }

@@ -1,4 +1,4 @@
-import type { PageAdapter, TurnCandidate, TurnRole } from '@/shared/contracts';
+import type { PageAdapter, TurnBusySignal, TurnCandidate, TurnRole } from '@/shared/contracts';
 
 const LIVE_TURN_SELECTORS = [
   'section[data-testid^="conversation-turn-"][data-turn][data-turn-id]',
@@ -87,15 +87,15 @@ export class ChatGptPageAdapter implements PageAdapter {
         return;
       }
 
+      const busySignal = resolveBusySignal(element);
+
       candidates.push({
         id: element.dataset.turnId ?? `${role}-${index}`,
         role,
         text: element.textContent?.trim() ?? '',
         element,
-        generating:
-          element.dataset.generating === 'true' ||
-          element.getAttribute('aria-busy') === 'true' ||
-          element.querySelector('[data-writing-block], [aria-busy="true"]') !== null
+        busySignal,
+        generating: busySignal !== 'none'
       });
     });
 
@@ -166,6 +166,22 @@ export class ChatGptPageAdapter implements PageAdapter {
     const searchRoot = scrollContainer.querySelector<HTMLElement>('#thread') ?? scrollContainer;
     return collectTurnRootElements(searchRoot).filter((element) => Boolean(resolveRole(element)));
   }
+}
+
+function resolveBusySignal(element: HTMLElement): TurnBusySignal {
+  if (element.getAttribute('aria-busy') === 'true') {
+    return 'root-aria-busy';
+  }
+
+  if (element.querySelector('[data-writing-block]') !== null) {
+    return 'writing-block';
+  }
+
+  if (element.querySelector('[aria-busy="true"]') !== null) {
+    return 'descendant-aria-busy';
+  }
+
+  return 'none';
 }
 
 function resolveRole(element: HTMLElement): TurnRole | null {

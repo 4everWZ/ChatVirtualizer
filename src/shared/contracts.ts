@@ -1,4 +1,7 @@
 export type TurnRole = 'user' | 'assistant' | 'tool' | 'system';
+export type TurnBusySignal = 'none' | 'root-aria-busy' | 'descendant-aria-busy' | 'writing-block';
+export type RecordRenderMode = 'live' | 'lite' | 'collapsed';
+export type SessionPhase = 'bootstrapping' | 'steady';
 
 export interface ExtensionConfig {
   windowSizeQa: number;
@@ -25,6 +28,7 @@ export interface QARecord {
   textCombined: string;
   height: number;
   mounted: boolean;
+  renderMode: RecordRenderMode;
   stable: boolean;
   generating: boolean;
   protectedUntil?: number;
@@ -33,6 +37,7 @@ export interface QARecord {
   elements?: HTMLElement[];
   rootElement?: HTMLElement | null;
   detachedRoot?: HTMLElement | null;
+  liveRootCache?: HTMLElement | null;
 }
 
 export interface SessionState {
@@ -43,6 +48,7 @@ export interface SessionState {
   totalRecords: number;
   fullyIndexed: boolean;
   windowMode: 'auto' | 'manual-expanded';
+  phase: SessionPhase;
 }
 
 export interface SearchHit {
@@ -73,6 +79,8 @@ export interface SessionStats {
 
 export interface WindowPlan {
   mountRecordIds: string[];
+  liveRecordIds: string[];
+  liteRecordIds: string[];
   evictRecordIds: string[];
 }
 
@@ -86,6 +94,7 @@ export interface TurnCandidate {
   role: TurnRole;
   text: string;
   element: HTMLElement;
+  busySignal?: TurnBusySignal;
   generating?: boolean;
 }
 

@@ -2,13 +2,13 @@
 
 ## Summary
 
-This active spec defines the v1 implementation of the Edge Chat Virtualizer as a ChatGPT-only Edge MV3 extension. The implementation goal is to reduce long-thread DOM pressure by keeping only a bounded recent QA window mounted, collapsing older history into compact groups, restoring older history on demand, supporting browser-native find across collapsed records, and maintaining the window in real time as the same conversation continues to grow.
+This active spec defines the v1 implementation of the Edge Chat Virtualizer as a ChatGPT-only Edge MV3 extension. The implementation goal is to reduce long-thread DOM pressure by keeping only a bounded recent QA window mounted, collapsing older history into compact groups, restoring older history on demand, supporting browser-native find across collapsed records, and maintaining the window in real time as the same conversation continues to grow. The current version uses a two-phase runtime: an early pressure-relief bootstrap that collapses old history quickly, followed by a steady-state window that keeps only the newest four visible records as full live DOM and downgrades the older visible portion of the 10-record window into lighter reading-state DOM.
 
 ## Scope
 
 - Target site: ChatGPT Web.
 - Runtime shape: content-script-first Edge MV3 extension with event-driven activation and session tracking only.
-- Core behaviors: session detection, QA record grouping, real-time window management, top-triggered restore, site quick-jump expansion for collapsed targets, native find restoration, popup/options configuration, and safe degradation.
+- Core behaviors: session detection, QA record grouping, two-phase real-time window management, top-triggered restore, site quick-jump expansion for collapsed targets, native find restoration, popup/options configuration, and safe degradation.
 - Persistence: local-only configuration in `chrome.storage.local`, record snapshots and searchable text reservoirs in IndexedDB-backed records.
 
 ## Document Set

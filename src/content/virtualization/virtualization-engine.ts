@@ -1,4 +1,4 @@
-import type { ExtensionConfig, QARecord, RecordSnapshot, SnapshotStore } from '@/shared/contracts';
+import type { ExtensionConfig, QARecord, RecordSnapshot, SnapshotStore, WindowPlan } from '@/shared/contracts';
 import { createCollapsedGroupId } from '@/shared/ids';
 import { Logger } from '@/shared/logger';
 import { createCollapsedGroupElement } from './placeholders';
@@ -10,6 +10,10 @@ interface VirtualizationEngineOptions {
   snapshotStore: SnapshotStore;
   detachedRootRetentionMs?: number;
   snapshotSerializeDelayMs?: number;
+}
+
+interface RestoreRangeOptions {
+  forceLiveRecordIds?: string[];
 }
 
 interface CollapsedGroupRange {
@@ -36,6 +40,9 @@ export class VirtualizationEngine {
   private scrollContainer: HTMLElement | null = null;
   private detachedRootReleaseTimer?: number;
   private snapshotSerializeTimer?: number;
+  private cleanupInteractionListeners?: () => void;
+  private readonly forcedLiveRecordIds = new Set<string>();
+  private preferredLiveOrder: string[] = [];
 
   constructor(options: VirtualizationEngineOptions) {
     this.config = options.config;
@@ -48,6 +55,7 @@ export class VirtualizationEngine {
   async attach(scrollContainer: HTMLElement, records: QARecord[]): Promise<void> {
     this.scrollContainer = scrollContainer;
     this.records = records;
+    this.installInteractionListeners();
 
     for (const record of this.records) {
       this.ensureWrapper(record);
@@ -59,7 +67,10 @@ export class VirtualizationEngine {
   }
 
   async applyWindowPlan(now = Date.now()): Promise<void> {
-    const plan = computeWindowPlan(this.records, this.config, now);
+    const plan = computeWindowPlan(this.records, this.config, now, {
+      forcedLiveRecordIds: this.forcedLiveRecordIds,
+      preferredLiveOrder: this.preferredLiveOrder
+    });
 
     for (const recordId of plan.mountRecordIds) {
       const record = this.findRecord(recordId);
@@ -75,14 +86,20 @@ export class VirtualizationEngine {
       }
     }
 
+    this.applyMountedRenderModes(plan);
     this.renderCollapsedGroups();
   }
 
-  async restoreRange(start: number, end: number): Promise<void> {
+  async restoreRange(start: number, end: number, options: RestoreRangeOptions = {}): Promise<void> {
+    if (options.forceLiveRecordIds) {
+      this.setForcedLiveRecordIds(options.forceLiveRecordIds);
+    }
+
     for (const record of this.records.slice(start, end + 1)) {
       await this.restoreRecord(record);
     }
 
+    this.applyMountedRenderModes();
     this.renderCollapsedGroups();
   }
 
@@ -103,6 +120,10 @@ export class VirtualizationEngine {
 
     this.pendingSnapshotRecordIds.clear();
     this.detachedRootExpiry.clear();
+    this.preferredLiveOrder = [];
+    this.forcedLiveRecordIds.clear();
+    this.cleanupInteractionListeners?.();
+    this.cleanupInteractionListeners = undefined;
 
     for (const group of this.collapsedGroups) {
       group.element.remove();
@@ -129,6 +150,10 @@ export class VirtualizationEngine {
     return this.records;
   }
 
+  clearForcedLiveRecordIds(): void {
+    this.forcedLiveRecordIds.clear();
+  }
+
   scrollToRecord(recordId: string): void {
     const record = this.findRecord(recordId);
     const target = record?.rootElement ?? this.findCollapsedGroupForRecord(recordId)?.element;
@@ -150,8 +175,60 @@ export class VirtualizationEngine {
     return this.collapsedGroups.find((group) => group.recordIds.includes(recordId));
   }
 
+  private installInteractionListeners(): void {
+    this.cleanupInteractionListeners?.();
+    this.cleanupInteractionListeners = undefined;
+
+    const threadRoot = this.getThreadRoot();
+    if (!threadRoot) {
+      return;
+    }
+
+    const promoteFromTarget = (target: EventTarget | null) => {
+      const recordId = this.findLiteRecordIdFromTarget(target);
+      if (!recordId) {
+        return;
+      }
+
+      this.rememberPreferredLiveRecord(recordId);
+      this.applyMountedRenderModes();
+    };
+
+    const onClick = (event: Event) => {
+      promoteFromTarget(event.target);
+    };
+    const onFocusIn = (event: FocusEvent) => {
+      promoteFromTarget(event.target);
+    };
+    const onPointerEnter = (event: PointerEvent) => {
+      promoteFromTarget(event.target);
+    };
+    const onSelectionChange = () => {
+      const selection = document.getSelection();
+      if (!selection) {
+        return;
+      }
+
+      const anchorNode = selection.anchorNode instanceof Element ? selection.anchorNode : selection.anchorNode?.parentElement;
+      promoteFromTarget(anchorNode ?? null);
+    };
+
+    threadRoot.addEventListener('click', onClick, true);
+    threadRoot.addEventListener('focusin', onFocusIn, true);
+    threadRoot.addEventListener('pointerenter', onPointerEnter, true);
+    document.addEventListener('selectionchange', onSelectionChange);
+
+    this.cleanupInteractionListeners = () => {
+      threadRoot.removeEventListener('click', onClick, true);
+      threadRoot.removeEventListener('focusin', onFocusIn, true);
+      threadRoot.removeEventListener('pointerenter', onPointerEnter, true);
+      document.removeEventListener('selectionchange', onSelectionChange);
+    };
+  }
+
   private ensureWrapper(record: QARecord): void {
     if (record.rootElement?.isConnected) {
+      this.applyRenderMetadata(record);
       return;
     }
 
@@ -164,7 +241,9 @@ export class VirtualizationEngine {
     if (existingWrapper) {
       record.rootElement = existingWrapper;
       record.mounted = true;
+      record.renderMode = record.renderMode === 'collapsed' ? 'live' : record.renderMode;
       record.elements = Array.from(existingWrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      this.applyRenderMetadata(record);
       return;
     }
 
@@ -180,6 +259,8 @@ export class VirtualizationEngine {
 
     record.rootElement = wrapper;
     record.mounted = true;
+    record.renderMode = record.renderMode === 'collapsed' ? 'live' : record.renderMode;
+    this.applyRenderMetadata(record);
   }
 
   private async evictRecord(record: QARecord): Promise<void> {
@@ -187,11 +268,13 @@ export class VirtualizationEngine {
       return;
     }
 
-    const detachedRoot = record.rootElement;
-    detachedRoot.remove();
+    const detachedRoot = record.liveRootCache ?? record.rootElement;
+    record.rootElement.remove();
     record.detachedRoot = detachedRoot;
+    record.liveRootCache = null;
     record.rootElement = null;
     record.mounted = false;
+    record.renderMode = 'collapsed';
     this.pendingSnapshotRecordIds.add(record.id);
     this.detachedRootExpiry.set(record.id, Date.now() + this.detachedRootRetentionMs);
     this.scheduleSnapshotSerialization();
@@ -218,7 +301,9 @@ export class VirtualizationEngine {
       this.scheduleDetachedRootRelease();
       record.rootElement = wrapper;
       record.mounted = true;
+      record.renderMode = 'live';
       record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      this.applyRenderMetadata(record);
       this.logger.debug('Restored record from detached DOM', record.id);
       return true;
     }
@@ -244,8 +329,10 @@ export class VirtualizationEngine {
     record.rootElement = wrapper;
     record.snapshotHtml = snapshot.html;
     record.mounted = true;
+    record.renderMode = 'live';
     record.height = snapshot.height;
     record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+    this.applyRenderMetadata(record);
     this.logger.debug('Restored record', record.id);
     return true;
   }
@@ -323,7 +410,9 @@ export class VirtualizationEngine {
 
     const start = Math.max(0, targetIndex - this.config.searchContextBefore);
     const end = Math.min(this.records.length - 1, targetIndex + this.config.searchContextAfter);
-    await this.restoreRange(start, end);
+    await this.restoreRange(start, end, {
+      forceLiveRecordIds: this.records.slice(start, end + 1).map((record) => record.id)
+    });
 
     const restored = this.findRecord(recordId);
     if (restored?.mounted) {
@@ -363,6 +452,165 @@ export class VirtualizationEngine {
 
   private getThreadRoot(): HTMLElement | null {
     return this.scrollContainer?.querySelector<HTMLElement>('#thread') ?? this.scrollContainer;
+  }
+
+  private applyMountedRenderModes(plan?: Pick<WindowPlan, 'liveRecordIds' | 'liteRecordIds' | 'mountRecordIds'>): void {
+    const visibleRecordIds = plan?.mountRecordIds ?? this.records.filter((record) => record.mounted).map((record) => record.id);
+    const visibleSet = new Set(visibleRecordIds);
+    const liveRecordIds = plan?.liveRecordIds ?? this.computeLiveRecordIds(visibleRecordIds);
+    const liveSet = new Set(liveRecordIds);
+    const liteRecordIds = plan?.liteRecordIds ?? visibleRecordIds.filter((recordId) => !liveSet.has(recordId));
+
+    this.preferredLiveOrder = this.preferredLiveOrder.filter((recordId) => visibleSet.has(recordId));
+    for (const forcedRecordId of Array.from(this.forcedLiveRecordIds)) {
+      if (!visibleSet.has(forcedRecordId)) {
+        this.forcedLiveRecordIds.delete(forcedRecordId);
+      }
+    }
+
+    for (const recordId of liteRecordIds) {
+      const record = this.findRecord(recordId);
+      if (record) {
+        this.ensureLiteRecord(record);
+      }
+    }
+
+    for (const recordId of liveRecordIds) {
+      const record = this.findRecord(recordId);
+      if (record) {
+        this.ensureLiveRecord(record);
+      }
+    }
+
+    for (const record of this.records) {
+      if (!visibleSet.has(record.id)) {
+        record.renderMode = 'collapsed';
+      }
+    }
+  }
+
+  private computeLiveRecordIds(visibleRecordIds: string[]): string[] {
+    const visibleSet = new Set(visibleRecordIds);
+    const visibleRecords = this.records.filter((record) => visibleSet.has(record.id));
+    const protectedIds = visibleRecords.filter((record) => this.isProtectedRecord(record)).map((record) => record.id);
+    const forcedIds = visibleRecords.filter((record) => this.forcedLiveRecordIds.has(record.id)).map((record) => record.id);
+    const preferredIds = this.preferredLiveOrder.filter(
+      (recordId) => visibleSet.has(recordId) && !this.forcedLiveRecordIds.has(recordId) && !this.isProtectedRecord(this.findRecord(recordId))
+    );
+    const budgetedPreferredIds = preferredIds.slice(-4);
+    const remainingHotSlots = Math.max(0, 4 - budgetedPreferredIds.length);
+    const fallbackTailIds =
+      remainingHotSlots === 0
+        ? []
+        : visibleRecords
+            .filter(
+              (record) =>
+                !this.isProtectedRecord(record) &&
+                !this.forcedLiveRecordIds.has(record.id) &&
+                !budgetedPreferredIds.includes(record.id)
+            )
+            .slice(-remainingHotSlots)
+            .map((record) => record.id);
+
+    return Array.from(new Set([...protectedIds, ...forcedIds, ...budgetedPreferredIds, ...fallbackTailIds]));
+  }
+
+  private ensureLiteRecord(record: QARecord): void {
+    if (!record.mounted || !record.rootElement) {
+      return;
+    }
+
+    if (record.renderMode === 'lite') {
+      this.applyRenderMetadata(record);
+      return;
+    }
+
+    const liveRoot = record.rootElement;
+    if (!record.snapshotHtml) {
+      const snapshot = this.createSnapshot(record, liveRoot);
+      this.snapshotCache.set(record.id, snapshot);
+      record.snapshotHtml = snapshot.html;
+      this.queueSnapshotPersist(snapshot);
+    }
+
+    const liteRoot = this.createRootFromHtml(record, record.snapshotHtml ?? '');
+    liveRoot.replaceWith(liteRoot);
+    record.liveRootCache = liveRoot;
+    record.rootElement = liteRoot;
+    record.elements = Array.from(liteRoot.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+    record.renderMode = 'lite';
+    this.applyRenderMetadata(record);
+  }
+
+  private ensureLiveRecord(record: QARecord): void {
+    if (!record.mounted) {
+      return;
+    }
+
+    if (record.renderMode === 'live' && record.rootElement?.isConnected) {
+      this.applyRenderMetadata(record);
+      return;
+    }
+
+    const currentRoot = record.rootElement;
+    const liveRoot = record.liveRootCache;
+    if (currentRoot && liveRoot) {
+      currentRoot.replaceWith(liveRoot);
+      record.rootElement = liveRoot;
+      record.liveRootCache = null;
+      record.elements = Array.from(liveRoot.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+    }
+
+    record.renderMode = 'live';
+    this.applyRenderMetadata(record);
+  }
+
+  private createRootFromHtml(record: QARecord, html: string): HTMLElement {
+    const wrapper = document.createElement('div');
+    wrapper.className = 'ecv-record-root';
+    wrapper.dataset.recordId = record.id;
+    wrapper.dataset.recordIndex = `${record.index}`;
+    wrapper.innerHTML = html;
+    return wrapper;
+  }
+
+  private applyRenderMetadata(record: QARecord): void {
+    if (!record.rootElement) {
+      return;
+    }
+
+    record.rootElement.dataset.renderMode = record.renderMode;
+    record.rootElement.classList.toggle('ecv-record-root--lite', record.renderMode === 'lite');
+    record.rootElement.classList.toggle('ecv-record-root--live', record.renderMode === 'live');
+  }
+
+  private rememberPreferredLiveRecord(recordId: string): void {
+    this.preferredLiveOrder = this.preferredLiveOrder.filter((candidate) => candidate !== recordId);
+    this.preferredLiveOrder.push(recordId);
+  }
+
+  private setForcedLiveRecordIds(recordIds: Iterable<string>): void {
+    this.forcedLiveRecordIds.clear();
+    for (const recordId of recordIds) {
+      this.forcedLiveRecordIds.add(recordId);
+    }
+  }
+
+  private findLiteRecordIdFromTarget(target: EventTarget | null): string | null {
+    if (!(target instanceof Element)) {
+      return null;
+    }
+
+    const recordRoot = target.closest<HTMLElement>('.ecv-record-root[data-render-mode="lite"]');
+    return recordRoot?.dataset.recordId ?? null;
+  }
+
+  private isProtectedRecord(record: QARecord | undefined, now = Date.now()): boolean {
+    if (!record) {
+      return false;
+    }
+
+    return record.generating || (record.protectedUntil !== undefined && record.protectedUntil > now);
   }
 
   private createSnapshot(record: QARecord, sourceRoot: HTMLElement | null): RecordSnapshot {
