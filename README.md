@@ -20,7 +20,7 @@
 - Preserve manually restored older history until the user returns near the bottom of the conversation
 - Restore older history when the user reaches the top of the chat container
 - Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
-- Suspend virtualization during ChatGPT's native `Edit message` flow, then rebuild the normal window after edit mode exits
+- Suspend virtualization during ChatGPT's native `Edit message` flow, then rebuild the normal window only after the post-edit thread has settled
 - Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
 - Keep collapsed DOM roots only briefly for same-session fast restore, then fall back to lightweight snapshots for lower memory retention
 - Expose popup stats and options for runtime configuration

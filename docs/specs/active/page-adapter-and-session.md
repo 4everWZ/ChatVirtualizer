@@ -21,7 +21,7 @@ Only ChatGPT is implemented in the current version.
 - Reindexing is debounced so repeated mutations collapse into a single rebuild window.
 - Same-session tail growth must be handled incrementally when the visible mounted records remain compatible with the previous session state; full rebuild is the fallback, not the default path.
 - Any pending restore work is cancelled when the session token changes.
-- Native ChatGPT edit mode is a temporary unsupported transition. Once an `Edit message` trigger is detected, the session controller must suspend virtualization, unwrap extension-owned live wrappers, remove collapsed groups, and wait until the supported turn contract returns before rebuilding.
+- Native ChatGPT edit mode is a temporary unsupported transition. Once an `Edit message` trigger is detected, the session controller must suspend virtualization, unwrap extension-owned live wrappers, remove collapsed groups, and wait until the supported turn contract returns and stays quiet for the normal steady-state debounce before rebuilding.
 - Session state has two runtime modes:
   - `auto`: keep the most recent `windowSizeQa` stable records mounted, while generating and temporarily protected records may extend the mounted set until they settle.
   - `manual-expanded`: entered after top-triggered restore or site quick-jump expansion; new tail records append without immediately re-collapsing old history.

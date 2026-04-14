@@ -399,6 +399,23 @@ class EditableChatGptAdapter implements PageAdapter {
     this.renderConversation();
   }
 
+  submitEditWithDelayedRecovery(delayMs: number): void {
+    this.editActive = false;
+    this.thread.innerHTML = '';
+    this.thread.append(
+      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', 'Edited Question 1'),
+      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', 'Draft replacement answer')
+    );
+
+    window.setTimeout(() => {
+      this.records[0] = {
+        question: 'Edited Question 1',
+        answer: 'Replacement Answer 1'
+      };
+      this.renderConversation();
+    }, delayMs);
+  }
+
   private enterEditMode(): void {
     this.editActive = true;
     const first = this.records[0];
@@ -940,6 +957,62 @@ describe('session controller', () => {
       });
     } finally {
       controller.stop();
+    }
+  });
+
+  test('waits for post-edit DOM recovery to settle before rebuilding virtualization after edit send', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-send-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelector('textarea[aria-label="Edit message"]')).not.toBeNull();
+      });
+
+      adapter.submitEditWithDelayedRecovery(600);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+      expect(controller.getStats().totalRecords).toBe(12);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(700);
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
     }
   });
 });

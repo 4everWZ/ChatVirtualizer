@@ -118,6 +118,7 @@ export class SessionController {
     if (this.suspendedForNativeEdit) {
       if (nativeEditDetected) {
         this.nativeEditActive = true;
+        this.clearInitializationTimer();
         this.armActivationWatcher();
         await this.publishStats();
         return;
@@ -125,13 +126,14 @@ export class SessionController {
 
       this.nativeEditActive = false;
       if (!this.adapter.canHandlePage()) {
+        this.clearInitializationTimer();
         this.armActivationWatcher();
         await this.publishStats();
         return;
       }
 
       this.armActivationWatcher();
-      this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS);
+      this.scheduleInitialization(this.config.stabilityQuietMs);
       return;
     }
 

@@ -18,7 +18,7 @@ The system is assembled around a session controller that coordinates adapter dis
 - The steady-state mounted window must split into `live`, `lite`, and `collapsed` records. Only the newest hot subset stays as full ChatGPT DOM by default; older visible records must use lighter reading-state wrappers.
 - Mutation handling must remain event-driven for both turn insertion and turn settlement. Attribute-driven changes such as `aria-busy` / `data-generating` clearing must be sufficient to trigger the post-generation re-collapse path without refresh.
 - Child-node changes inside an existing turn must also count as relevant settlement signals when they add or remove busy descendants such as hydration markers or writing blocks.
-- Native ChatGPT edit mode must suspend mutation-driven virtualization work entirely. While the site owns the edit DOM, no reindex or re-collapse path may keep running against the thread.
+- Native ChatGPT edit mode must suspend mutation-driven virtualization work entirely. While the site owns the edit DOM, no reindex or re-collapse path may keep running against the thread, and rebuild after edit exit must wait for the full steady-state quiet window rather than the short activation window.
 - Background, popup, and options communicate only through typed runtime messages.
 - Popup stats must query the active content tab first and use background state only as a fallback when MV3 worker suspension has dropped cached state.
 - Storage access is asynchronous and must never block DOM mutation handling on the hot path.
