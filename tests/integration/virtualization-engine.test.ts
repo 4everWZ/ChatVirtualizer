@@ -339,6 +339,54 @@ describe('virtualization engine', () => {
       vi.useRealTimers();
     }
   });
+
+  test('does not evict the current visible window when the requested replacement records cannot be restored', async () => {
+    installFixtureDom('chatgpt-long.html', 'https://chatgpt.com/c/local-session');
+
+    const extraTurns = Array.from(document.querySelectorAll<HTMLElement>('section[data-turn]')).slice(4);
+    for (const turn of extraTurns) {
+      turn.remove();
+    }
+
+    const adapter = new ChatGptPageAdapter(document);
+    const scrollContainer = adapter.getScrollContainer();
+    if (!scrollContainer) {
+      throw new Error('expected fixture to expose a scroll container');
+    }
+
+    const records = buildQaRecordsFromTurns(adapter.collectTurnCandidates(), 'local-session');
+    const engine = new VirtualizationEngine({
+      config: {
+        ...DEFAULT_CONFIG,
+        windowSizeQa: 1
+      },
+      snapshotStore: new IndexedDbSnapshotStore('ecv-virtualizer-safe-evict-test')
+    });
+
+    await engine.attach(scrollContainer, records);
+
+    const firstRecord = records[0];
+    const secondRecord = records[1];
+    if (!firstRecord?.rootElement || !secondRecord?.rootElement) {
+      throw new Error('expected both records to be mounted after attach');
+    }
+
+    secondRecord.rootElement.remove();
+    secondRecord.rootElement = null;
+    secondRecord.elements = [];
+    secondRecord.liveRootCache = null;
+    secondRecord.detachedRoot = null;
+    secondRecord.snapshotHtml = undefined;
+    secondRecord.mounted = false;
+    secondRecord.renderMode = 'collapsed';
+
+    await engine.applyWindowPlan();
+
+    expect(scrollContainer.querySelectorAll('.ecv-record-root')).toHaveLength(1);
+    expect(firstRecord.rootElement?.isConnected).toBe(true);
+    expect(firstRecord.mounted).toBe(true);
+    expect(secondRecord.mounted).toBe(false);
+  });
 });
 
 class SlowSnapshotStore implements SnapshotStore {

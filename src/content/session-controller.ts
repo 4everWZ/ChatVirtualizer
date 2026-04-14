@@ -18,6 +18,7 @@ interface SessionControllerOptions {
 }
 
 const INITIAL_ACTIVATION_QUIET_MS = 250;
+type InitializationMode = 'session-init' | 'native-edit-recovery';
 
 export class SessionController {
   private readonly adapter: PageAdapter;
@@ -36,10 +37,12 @@ export class SessionController {
   private scrollContainer: HTMLElement | null = null;
   private isApplyingDomChanges = false;
   private initializationTimer?: number;
+  private initializationMode: InitializationMode = 'session-init';
   private cleanupEditModeListener?: () => void;
   private cleanupQuickJumpListener?: () => void;
   private cleanupScrollModeListener?: () => void;
   private nativeEditActive = false;
+  private nativeEditRecoveryRecords: QARecord[] | null = null;
   private reindexTimer?: number;
   private phaseSettleTimer?: number;
   private suspendedForNativeEdit = false;
@@ -94,6 +97,7 @@ export class SessionController {
     }
 
     this.nativeEditActive = false;
+    this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
   }
 
@@ -111,7 +115,7 @@ export class SessionController {
 
   private async ensureSessionStarted(): Promise<void> {
     const nativeEditDetected = this.adapter.isNativeEditActive?.() ?? false;
-    if (nativeEditDetected && !this.suspendedForNativeEdit && this.currentSessionState && this.virtualizer) {
+    if (nativeEditDetected && !this.suspendedForNativeEdit) {
       this.enterNativeEditMode();
     }
 
@@ -133,7 +137,7 @@ export class SessionController {
       }
 
       this.armActivationWatcher();
-      this.scheduleInitialization(this.config.stabilityQuietMs);
+      this.scheduleInitialization(this.config.stabilityQuietMs, 'native-edit-recovery');
       return;
     }
 
@@ -151,7 +155,7 @@ export class SessionController {
     }
 
     this.armActivationWatcher();
-    this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS);
+    this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS, 'session-init');
   }
 
   private async initializeSession(): Promise<void> {
@@ -232,6 +236,7 @@ export class SessionController {
     this.records = [];
     this.scrollContainer = null;
     this.nativeEditActive = false;
+    this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
   }
 
@@ -247,11 +252,17 @@ export class SessionController {
     });
   }
 
-  private scheduleInitialization(quietMs: number): void {
+  private scheduleInitialization(quietMs: number, mode: InitializationMode): void {
     this.clearInitializationTimer();
+    this.initializationMode = mode;
     this.initializationTimer = window.setTimeout(() => {
       this.initializationTimer = undefined;
       this.disarmActivationWatcher();
+      if (this.initializationMode === 'native-edit-recovery') {
+        void this.recoverFromNativeEdit();
+        return;
+      }
+
       void this.initializeSession();
     }, quietMs);
   }
@@ -347,6 +358,10 @@ export class SessionController {
 
     const partialTurns = this.adapter.collectTurnCandidates();
     if (partialTurns.length === 0) {
+      if (this.hasMountedDomLoss()) {
+        this.suspendForThreadRecovery();
+        await this.publishStats();
+      }
       return;
     }
 
@@ -359,6 +374,85 @@ export class SessionController {
     }
 
     await this.applySessionRecords(sessionId, scrollContainer, mergedRecords, this.currentSessionState.windowMode, this.currentSessionState.phase);
+  }
+
+  private hasMountedDomLoss(): boolean {
+    const mountedRecords = this.records.filter((record) => record.mounted);
+    if (mountedRecords.length === 0) {
+      return false;
+    }
+
+    return mountedRecords.every((record) => !record.rootElement?.isConnected);
+  }
+
+  private suspendForThreadRecovery(): void {
+    if (this.suspendedForNativeEdit) {
+      return;
+    }
+
+    this.nativeEditActive = false;
+    this.suspendedForNativeEdit = true;
+    this.clearInitializationTimer();
+    this.clearReindexTimer();
+    this.clearPhaseSettleTimer();
+    this.mutationObserver?.disconnect();
+    this.mutationObserver = undefined;
+    this.scrollManager?.disconnect();
+    this.scrollManager = undefined;
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
+    this.cleanupQuickJumpListener?.();
+    this.cleanupQuickJumpListener = undefined;
+    this.cleanupScrollModeListener?.();
+    this.cleanupScrollModeListener = undefined;
+
+    if (!this.nativeEditRecoveryRecords) {
+      this.nativeEditRecoveryRecords = this.records.map((record) => cloneRecoveryRecord(record));
+    }
+
+    if (this.virtualizer) {
+      this.virtualizer.suspendForNativeEdit();
+      this.records = this.virtualizer.getRecords();
+      this.syncSessionState();
+    }
+
+    this.armActivationWatcher();
+  }
+
+  private async recoverFromNativeEdit(): Promise<void> {
+    if (this.adapter.isNativeEditActive?.()) {
+      this.enterNativeEditMode();
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
+    const sessionId = this.adapter.getSessionId();
+    const scrollContainer = this.adapter.getScrollContainer();
+    if (!scrollContainer) {
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
+    const partialTurns = this.adapter.collectTurnCandidates();
+    if (partialTurns.length === 0) {
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
+    const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
+    const recoveredRecords = this.recoverNativeEditRecords(sessionId, partialRecords);
+    if (!recoveredRecords) {
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
+    const windowMode = this.currentSessionState?.windowMode ?? 'auto';
+    const phase = this.currentSessionState?.phase ?? 'steady';
+    await this.applySessionRecords(sessionId, scrollContainer, recoveredRecords, windowMode, phase);
   }
 
   private async runWithoutMutationReindex(work: () => Promise<void>): Promise<void> {
@@ -417,6 +511,7 @@ export class SessionController {
       phase
     };
     this.nativeEditActive = false;
+    this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
     this.syncSessionState();
     if (phase === 'bootstrapping') {
@@ -487,6 +582,25 @@ export class SessionController {
     }
 
     return merged;
+  }
+
+  private recoverNativeEditRecords(sessionId: string, partialRecords: QARecord[]): QARecord[] | null {
+    const preservedRecords = this.nativeEditRecoveryRecords ?? this.records;
+    if (preservedRecords.length === 0) {
+      return partialRecords;
+    }
+
+    const recoveryRangeStart = findContiguousRecoveryRange(preservedRecords, partialRecords);
+    if (recoveryRangeStart >= 0) {
+      return mergeRecoveredRecordRange(sessionId, preservedRecords, partialRecords, recoveryRangeStart);
+    }
+
+    const fullyRecoveredThreshold = Math.max(this.config.windowSizeQa, preservedRecords.length - 1);
+    if (partialRecords.length >= fullyRecoveredThreshold) {
+      return partialRecords;
+    }
+
+    return null;
   }
 
   private installScrollModeListener(scrollContainer: HTMLElement): void {
@@ -664,7 +778,7 @@ export class SessionController {
   }
 
   private enterNativeEditMode(): void {
-    if (this.suspendedForNativeEdit || !this.currentSessionState || !this.virtualizer) {
+    if (this.suspendedForNativeEdit) {
       return;
     }
 
@@ -683,9 +797,14 @@ export class SessionController {
     this.cleanupQuickJumpListener = undefined;
     this.cleanupScrollModeListener?.();
     this.cleanupScrollModeListener = undefined;
-    this.virtualizer.suspendForNativeEdit();
-    this.records = this.virtualizer.getRecords();
-    this.syncSessionState();
+    if (this.virtualizer) {
+      this.virtualizer.suspendForNativeEdit();
+      this.records = this.virtualizer.getRecords();
+      this.nativeEditRecoveryRecords = this.records.map((record) => cloneRecoveryRecord(record));
+      this.syncSessionState();
+    } else if (this.records.length > 0) {
+      this.nativeEditRecoveryRecords = this.records.map((record) => cloneRecoveryRecord(record));
+    }
     this.armActivationWatcher();
     void this.publishStats();
   }
@@ -800,6 +919,13 @@ function recordsAreCompatible(left: QARecord, right: QARecord): boolean {
   return normalizeQuickJumpRecordText(left.textUser) === normalizeQuickJumpRecordText(right.textUser);
 }
 
+function cloneRecoveryRecord(record: QARecord): QARecord {
+  return {
+    ...record,
+    elements: record.elements ? [...record.elements] : undefined
+  };
+}
+
 function findSuffixPrefixOverlap(existingRecords: QARecord[], partialRecords: QARecord[]): number {
   const maxOverlap = Math.min(existingRecords.length, partialRecords.length);
 
@@ -821,6 +947,59 @@ function findSuffixPrefixOverlap(existingRecords: QARecord[], partialRecords: QA
   }
 
   return -1;
+}
+
+function findContiguousRecoveryRange(existingRecords: QARecord[], partialRecords: QARecord[]): number {
+  if (partialRecords.length === 0 || partialRecords.length > existingRecords.length) {
+    return -1;
+  }
+
+  const lastStartIndex = existingRecords.length - partialRecords.length;
+  for (let startIndex = 0; startIndex <= lastStartIndex; startIndex += 1) {
+    let matches = true;
+    for (let offset = 0; offset < partialRecords.length; offset += 1) {
+      const left = existingRecords[startIndex + offset];
+      const right = partialRecords[offset];
+      if (!left || !right || !recordsAreCompatible(left, right)) {
+        matches = false;
+        break;
+      }
+    }
+
+    if (matches) {
+      return startIndex;
+    }
+  }
+
+  return -1;
+}
+
+function mergeRecoveredRecordRange(sessionId: string, preservedRecords: QARecord[], partialRecords: QARecord[], startIndex: number): QARecord[] {
+  const merged = preservedRecords.map((record) => cloneRecoveryRecord(record));
+
+  for (let offset = 0; offset < partialRecords.length; offset += 1) {
+    const preserved = preservedRecords[startIndex + offset];
+    const partial = partialRecords[offset];
+    if (!preserved || !partial) {
+      continue;
+    }
+
+    merged[startIndex + offset] = {
+      ...partial,
+      id: preserved.id,
+      index: preserved.index,
+      sessionId,
+      mounted: preserved.mounted,
+      renderMode: preserved.renderMode,
+      protectedUntil: preserved.protectedUntil,
+      rootElement: null,
+      detachedRoot: preserved.detachedRoot,
+      liveRootCache: preserved.liveRootCache,
+      snapshotHtml: preserved.snapshotHtml
+    };
+  }
+
+  return merged;
 }
 
 function normalizeQuickJumpRecordText(value: string): string {

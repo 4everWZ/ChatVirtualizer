@@ -6,4 +6,9 @@ test-results/
 .pnpm-store/
 .DS_Store
 Thumbs.db
-
+output/
+*.log
+*.tmp
+*.env
+.idea/
+.vscode/

@@ -18,7 +18,10 @@ The system is assembled around a session controller that coordinates adapter dis
 - The steady-state mounted window must split into `live`, `lite`, and `collapsed` records. Only the newest hot subset stays as full ChatGPT DOM by default; older visible records must use lighter reading-state wrappers.
 - Mutation handling must remain event-driven for both turn insertion and turn settlement. Attribute-driven changes such as `aria-busy` / `data-generating` clearing must be sufficient to trigger the post-generation re-collapse path without refresh.
 - Child-node changes inside an existing turn must also count as relevant settlement signals when they add or remove busy descendants such as hydration markers or writing blocks.
-- Native ChatGPT edit mode must suspend mutation-driven virtualization work entirely. While the site owns the edit DOM, no reindex or re-collapse path may keep running against the thread, and rebuild after edit exit must wait for the full steady-state quiet window rather than the short activation window.
+- Native ChatGPT edit mode must suspend mutation-driven virtualization work entirely. While the site owns the edit DOM, no reindex or re-collapse path may keep running against the thread, including the pre-attach bootstrap window, and rebuild after edit exit must wait for the full steady-state quiet window rather than the short activation window.
+- Post-edit recovery must not trust the first supported DOM subtree blindly. If the returned turns can be merged against the preserved pre-edit records, the controller may resume virtualization; if the returned DOM is still obviously partial, the controller must remain suspended and wait for more DOM evidence instead of rebuilding a corrupt window.
+- If ChatGPT clears the recovered DOM again during the same post-edit transition, the controller must treat that as renewed instability, re-suspend virtualization, and wait for a later safe recovery point rather than keeping stale mounted state.
+- Window application must never evict the entire currently visible record set unless at least one replacement record has already been kept or restored successfully. A bad or partial plan is allowed to degrade to "keep the current window" but not to a blank thread with only collapsed history chrome.
 - Background, popup, and options communicate only through typed runtime messages.
 - Popup stats must query the active content tab first and use background state only as a fallback when MV3 worker suspension has dropped cached state.
 - Storage access is asynchronous and must never block DOM mutation handling on the hot path.
@@ -38,8 +41,10 @@ The system is assembled around a session controller that coordinates adapter dis
 - Session-controller tests must assert that the first supported-thread bootstrap completes before the full `stabilityQuietMs` steady-state debounce elapses.
 - Session-controller tests must assert that a thread which starts below the window and later grows past it is pressure-relieved during `bootstrapping` without waiting for the full steady-state debounce.
 - Session-controller tests must assert that site quick-jump clicks restore collapsed targets only on unique high-confidence matches.
-- Session-controller tests must assert that native `Edit message` removes extension-owned wrappers and collapsed groups during edit mode, then rebuilds the steady-state window after edit mode exits.
+- Session-controller tests must assert that native `Edit message` removes extension-owned wrappers and collapsed groups during edit mode, restores preserved history when cancel only re-renders the current window, and refuses to rebuild when post-send DOM is still an incomplete fragment.
+- Session-controller tests must also assert that post-edit DOM loss after an initial recovery attempt forces a second suspension instead of leaving stale mounted stats or orphaned collapsed groups behind.
 - Virtualization tests must assert that direct interaction with a visible `lite` record promotes it back into the live subset and demotes the oldest unprotected hot record.
+- Virtualization tests must assert that a failed replacement restore cannot evict the entire visible window.
 - Real-page A/B debugging must compare the same conversation with the extension disabled and enabled before performance claims are treated as fixed.
 - When real ChatGPT DOM contracts change, update the fixture pages to mirror the validated shape before treating the adapter as current.
 

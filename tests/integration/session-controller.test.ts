@@ -399,6 +399,11 @@ class EditableChatGptAdapter implements PageAdapter {
     this.renderConversation();
   }
 
+  finishEditModeWithVisibleSlice(startIndex: number, count: number): void {
+    this.editActive = false;
+    this.renderConversationSlice(startIndex, count);
+  }
+
   submitEditWithDelayedRecovery(delayMs: number): void {
     this.editActive = false;
     this.thread.innerHTML = '';
@@ -414,6 +419,27 @@ class EditableChatGptAdapter implements PageAdapter {
       };
       this.renderConversation();
     }, delayMs);
+  }
+
+  submitEditWithPartialRecovery(delayMs: number, startIndex: number, count: number): void {
+    this.editActive = false;
+    this.thread.innerHTML = '';
+    this.thread.append(
+      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', 'Edited Question 1'),
+      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', 'Draft replacement answer')
+    );
+
+    window.setTimeout(() => {
+      this.records[0] = {
+        question: 'Edited Question 1',
+        answer: 'Replacement Answer 1'
+      };
+      this.renderConversationSlice(startIndex, count);
+    }, delayMs);
+  }
+
+  restoreFullConversation(): void {
+    this.renderConversation();
   }
 
   private enterEditMode(): void {
@@ -438,7 +464,14 @@ class EditableChatGptAdapter implements PageAdapter {
 
   private renderConversation(): void {
     this.thread.innerHTML = '';
-    this.records.forEach((record, index) => {
+    this.renderConversationSlice(0, this.records.length);
+  }
+
+  private renderConversationSlice(startIndex: number, count: number): void {
+    this.thread.innerHTML = '';
+    const visibleRecords = this.records.slice(startIndex, startIndex + count);
+    visibleRecords.forEach((record, visibleIndex) => {
+      const index = startIndex + visibleIndex;
       const userTurnIndex = index * 2 + 1;
       const assistantTurnIndex = userTurnIndex + 1;
       this.thread.append(
@@ -1007,6 +1040,226 @@ describe('session controller', () => {
       await vi.advanceTimersByTimeAsync(700);
       await vi.waitFor(() => {
         expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('suspends native edit even before the first virtualization pass has attached', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-early-edit-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelector('textarea[aria-label="Edit message"]')).not.toBeNull();
+      });
+
+      await vi.advanceTimersByTimeAsync(400);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      adapter.submitEditWithDelayedRecovery(600);
+
+      await vi.advanceTimersByTimeAsync(500);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(1_500);
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      await startPromise;
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('restores the preserved record set after edit cancel when ChatGPT only re-renders the visible slice', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-cancel-slice-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.finishEditModeWithVisibleSlice(3, 10);
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelector('[data-record-id="editable-session:record:12"]')).not.toBeNull();
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('keeps virtualization suspended after edit send until the full thread is safe to recover', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-send-suspend-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.submitEditWithPartialRecovery(600, 0, 2);
+      await vi.advanceTimersByTimeAsync(1_700);
+
+      expect(adapter.isNativeEditActive()).toBe(false);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(controller.getStats().totalRecords).toBe(13);
+
+      adapter.restoreFullConversation();
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('re-suspends when the recovered thread is cleared again before ChatGPT finishes rebuilding', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-dom-loss-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.finishEditModeWithVisibleSlice(3, 10);
+      await vi.advanceTimersByTimeAsync(1_100);
+      await vi.waitFor(() => {
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+      });
+
+      const thread = document.querySelector('#thread');
+      if (!thread) {
+        throw new Error('expected thread root');
+      }
+      thread.innerHTML = '';
+
+      await vi.advanceTimersByTimeAsync(20);
+      await vi.waitFor(() => {
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(0);
+      });
+
+      adapter.restoreFullConversation();
+      await vi.advanceTimersByTimeAsync(1_100);
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
       });

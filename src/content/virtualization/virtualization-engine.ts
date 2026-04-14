@@ -72,21 +72,54 @@ export class VirtualizationEngine {
       preferredLiveOrder: this.preferredLiveOrder
     });
 
+    this.logger.debug('Applying window plan', {
+      evictCount: plan.evictRecordIds.length,
+      liteCount: plan.liteRecordIds.length,
+      liveCount: plan.liveRecordIds.length,
+      mountCount: plan.mountRecordIds.length,
+      mountRecordIds: plan.mountRecordIds
+    });
+
+    const resolvedMountRecordIds: string[] = [];
+
     for (const recordId of plan.mountRecordIds) {
       const record = this.findRecord(recordId);
-      if (record && !record.mounted) {
-        await this.restoreRecord(record);
+      if (!record) {
+        continue;
+      }
+
+      if (record.mounted) {
+        resolvedMountRecordIds.push(record.id);
+        continue;
+      }
+
+      if (await this.restoreRecord(record)) {
+        resolvedMountRecordIds.push(record.id);
       }
     }
 
-    for (const recordId of plan.evictRecordIds) {
+    const safeEvictRecordIds =
+      resolvedMountRecordIds.length === 0
+        ? []
+        : this.records
+            .filter((record) => record.mounted && !resolvedMountRecordIds.includes(record.id))
+            .map((record) => record.id);
+
+    if (plan.evictRecordIds.length > 0 && safeEvictRecordIds.length === 0 && resolvedMountRecordIds.length === 0) {
+      this.logger.warn('Skipped unsafe window eviction because no replacement records could be restored.', {
+        requestedEvictions: plan.evictRecordIds,
+        requestedMounts: plan.mountRecordIds
+      });
+    }
+
+    for (const recordId of safeEvictRecordIds) {
       const record = this.findRecord(recordId);
       if (record) {
         await this.evictRecord(record);
       }
     }
 
-    this.applyMountedRenderModes(plan);
+    this.applyMountedRenderModes();
     this.renderCollapsedGroups();
   }
 
@@ -181,12 +214,30 @@ export class VirtualizationEngine {
 
       this.ensureLiveRecord(record);
       const wrapper = record.rootElement;
-      if (!wrapper?.isConnected) {
+      if (!wrapper) {
+        record.rootElement = null;
+        record.liveRootCache = null;
+        record.mounted = false;
+        record.renderMode = 'collapsed';
+        continue;
+      }
+
+      if (!wrapper.isConnected) {
+        record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+        record.rootElement = null;
+        record.liveRootCache = null;
+        record.mounted = false;
+        record.renderMode = 'collapsed';
         continue;
       }
 
       const parent = wrapper.parentElement;
       if (!parent) {
+        record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+        record.rootElement = null;
+        record.liveRootCache = null;
+        record.mounted = false;
+        record.renderMode = 'collapsed';
         continue;
       }
 

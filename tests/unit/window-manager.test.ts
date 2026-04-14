@@ -46,4 +46,16 @@ describe('window manager', () => {
 
     expect(range).toEqual({ start: 5, end: 9 });
   });
+
+  test('clamps invalid window sizes so plans still keep a non-empty mounted tail', () => {
+    const records = Array.from({ length: 10 }, (_, index) => record(index));
+
+    const plan = computeWindowPlan(records, {
+      ...DEFAULT_CONFIG,
+      windowSizeQa: -10
+    }, Date.now());
+
+    expect(plan.mountRecordIds).toEqual(['record-9']);
+    expect(plan.evictRecordIds).toHaveLength(9);
+  });
 });

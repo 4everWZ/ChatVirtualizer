@@ -13,14 +13,22 @@ export function computeWindowPlan(
   now: number,
   options: WindowPlanOptions = {}
 ): WindowPlan {
+  const safeWindowSize = Math.max(1, Math.trunc(config.windowSizeQa));
   const protectedIds = new Set(records.filter((record) => isProtectedRecord(record, now)).map((record) => record.id));
   const preferredTailIds = new Set(
     records
       .filter((record) => !isProtectedRecord(record, now))
-      .slice(-config.windowSizeQa)
+      .slice(-safeWindowSize)
       .map((record) => record.id)
   );
-  const mountRecordIds = records.filter((record) => preferredTailIds.has(record.id) || protectedIds.has(record.id)).map((record) => record.id);
+  let mountRecordIds = records
+    .filter((record) => preferredTailIds.has(record.id) || protectedIds.has(record.id))
+    .map((record) => record.id);
+
+  if (records.length > 0 && mountRecordIds.length === 0) {
+    mountRecordIds = records.slice(-Math.min(safeWindowSize, records.length)).map((record) => record.id);
+  }
+
   const mountSet = new Set(mountRecordIds);
   const forcedLiveIds = new Set(Array.from(options.forcedLiveRecordIds ?? []).filter((recordId) => mountSet.has(recordId)));
   const protectedVisibleIds = mountRecordIds.filter((recordId) => protectedIds.has(recordId));
