@@ -34,6 +34,7 @@ The current version targets reading fidelity after restore rather than full Reac
 - Same-session reindex must merge the current visible DOM tail back into the in-memory record set instead of throwing away collapsed history on every mutation.
 - Same-session reindex must align the adapter-visible DOM tail against the existing record suffix instead of assuming every mounted visible record is still backed by live ChatGPT turn DOM.
 - Site quick-jump expansion reuses the same range-restore path as top-triggered restore and restores `target +/- searchContextBefore/searchContextAfter`.
+- Native ChatGPT edit mode suspends virtualization entirely: mounted wrappers are unwrapped back into site-owned DOM, collapsed groups are removed, and the normal mounted window is rebuilt only after edit mode exits.
 
 ## Code Mapping
 
@@ -52,6 +53,7 @@ The current version targets reading fidelity after restore rather than full Reac
 - Short-lived detached roots keep immediate same-session restores fast, but after the TTL expires the system restores from lighter snapshot HTML rather than the original DOM tree.
 - Keeping generating or protected records outside the nominal 10-record tail means mounted count can temporarily exceed `windowSizeQa`, but it avoids collapsing active or user-focused content.
 - Tail-only generation normalization is intentionally opinionated for ChatGPT: it rejects mid-thread hydrate noise in exchange for keeping the mounted window predictable on long real-world threads.
+- Suspending virtualization during native edit mode gives up temporary DOM control and stats continuity, but it is safer than fighting ChatGPT's own edit transition and corrupting the thread.
 
 ## Verification
 
@@ -61,3 +63,4 @@ The current version targets reading fidelity after restore rather than full Reac
 - Virtualization tests must assert that initial attach and collapse do not call `getBoundingClientRect()` and do not synchronously read evicted record `innerHTML`.
 - Virtualization tests must assert that detached roots are released after the retention TTL once snapshots are ready, and that snapshot restore omits heavy action chrome while keeping readable message content.
 - Virtualization tests must assert that the default visible window splits into four `live` records plus older `lite` records, and that interacting with a `lite` record promotes it while demoting the oldest unprotected `live` record.
+- Session-controller integration tests must assert that native `Edit message` suspends virtualization, removes extension-owned collapsed groups during edit mode, and rebuilds the 10-record window after edit completion or cancel.

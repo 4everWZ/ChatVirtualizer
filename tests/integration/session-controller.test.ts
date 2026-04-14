@@ -214,6 +214,14 @@ class DynamicChatGptAdapter implements PageAdapter {
     return target.closest<HTMLElement>('[data-quick-jump-item]')?.textContent?.trim() ?? null;
   }
 
+  isEditMessageTrigger(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && target.closest('button[aria-label="Edit message"]') !== null;
+  }
+
+  isNativeEditActive(): boolean {
+    return document.querySelector('textarea[aria-label="Edit message"]') !== null;
+  }
+
   appendQa(question: string, answer: string): void {
     const userIndex = ++this.turnCounter;
     const assistantIndex = ++this.turnCounter;
@@ -292,6 +300,135 @@ class DynamicChatGptAdapter implements PageAdapter {
     }
 
     return assistant;
+  }
+}
+
+class EditableChatGptAdapter implements PageAdapter {
+  private readonly scrollRoot: HTMLElement;
+  private readonly thread: HTMLElement;
+  private readonly records: Array<{ question: string; answer: string }> = [];
+  private editActive = false;
+
+  constructor(initialQaCount: number) {
+    this.scrollRoot = document.createElement('div');
+    this.scrollRoot.dataset.scrollRoot = '';
+    this.scrollRoot.style.height = '800px';
+    this.scrollRoot.style.overflowY = 'auto';
+
+    const main = document.createElement('main');
+    main.id = 'main';
+    this.thread = document.createElement('div');
+    this.thread.id = 'thread';
+    main.append(this.thread);
+    this.scrollRoot.append(main);
+    document.body.append(this.scrollRoot);
+
+    for (let index = 1; index <= initialQaCount; index += 1) {
+      this.records.push({
+        question: `Question ${index}`,
+        answer: `Answer ${index}`
+      });
+    }
+
+    this.renderConversation();
+  }
+
+  canHandlePage(): boolean {
+    return this.collectTurnCandidates().length >= 2;
+  }
+
+  getSessionId(): string {
+    return 'editable-session';
+  }
+
+  getScrollContainer(): HTMLElement | null {
+    return this.scrollRoot;
+  }
+
+  collectTurnCandidates(): TurnCandidate[] {
+    return Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-testid^="conversation-turn-"]')).map((element) => ({
+      id: element.dataset.turnId ?? 'missing-turn-id',
+      role: element.dataset.turn as TurnRole,
+      text: element.textContent?.trim() ?? '',
+      element
+    }));
+  }
+
+  observeSessionChanges(): () => void {
+    return () => undefined;
+  }
+
+  getConfidence(): number {
+    return 0.9;
+  }
+
+  isEditMessageTrigger(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && target.closest('button[aria-label="Edit message"]') !== null;
+  }
+
+  isNativeEditActive(): boolean {
+    return this.editActive && document.querySelector('textarea[aria-label="Edit message"]') !== null;
+  }
+
+  clickFirstEditButton(): void {
+    const button = this.thread.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]');
+    if (!button) {
+      throw new Error('expected an edit button');
+    }
+
+    button.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      })
+    );
+
+    window.setTimeout(() => {
+      if (document.querySelector('.ecv-record-root, .ecv-collapsed-group')) {
+        this.thread.innerHTML = '<div class="composer-parent flex flex-1 flex-col focus-visible:outline-0"></div>';
+        this.editActive = false;
+        return;
+      }
+
+      this.enterEditMode();
+    }, 0);
+  }
+
+  finishEditMode(): void {
+    this.editActive = false;
+    this.renderConversation();
+  }
+
+  private enterEditMode(): void {
+    this.editActive = true;
+    const first = this.records[0];
+    if (!first) {
+      throw new Error('expected a first record');
+    }
+
+    this.thread.innerHTML = '';
+    const composerParent = document.createElement('div');
+    composerParent.className = 'composer-parent flex flex-1 flex-col focus-visible:outline-0';
+    const textarea = document.createElement('textarea');
+    textarea.setAttribute('aria-label', 'Edit message');
+    textarea.value = first.question;
+    composerParent.append(
+      textarea,
+      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', first.answer)
+    );
+    this.thread.append(composerParent);
+  }
+
+  private renderConversation(): void {
+    this.thread.innerHTML = '';
+    this.records.forEach((record, index) => {
+      const userTurnIndex = index * 2 + 1;
+      const assistantTurnIndex = userTurnIndex + 1;
+      this.thread.append(
+        createEditableUserTurn(`conversation-turn-${userTurnIndex}`, `turn-${userTurnIndex}`, record.question),
+        createTurn(`conversation-turn-${assistantTurnIndex}`, `turn-${assistantTurnIndex}`, 'assistant', 'ChatGPT said:', record.answer)
+      );
+    });
   }
 }
 
@@ -763,6 +900,48 @@ describe('session controller', () => {
       controller.stop();
     }
   });
+
+  test('suspends virtualization for native edit mode and restores the window after edit mode exits', async () => {
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-mode-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickFirstEditButton();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelector('textarea[aria-label="Edit message"]')).not.toBeNull();
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+      });
+
+      adapter.finishEditMode();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
 });
 
 class StaticConfigStore extends ConfigStore {
@@ -791,5 +970,16 @@ function createTurn(testId: string, turnId: string, role: TurnRole, label: strin
   content.textContent = text;
 
   section.append(heading, content);
+  return section;
+}
+
+function createEditableUserTurn(testId: string, turnId: string, text: string): HTMLElement {
+  const section = createTurn(testId, turnId, 'user', 'You said:', text);
+  const actions = document.createElement('div');
+  const button = document.createElement('button');
+  button.setAttribute('aria-label', 'Edit message');
+  button.textContent = 'Edit';
+  actions.append(button);
+  section.append(actions);
   return section;
 }

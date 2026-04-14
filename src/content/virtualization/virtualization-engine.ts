@@ -154,6 +154,56 @@ export class VirtualizationEngine {
     this.forcedLiveRecordIds.clear();
   }
 
+  suspendForNativeEdit(): void {
+    if (this.snapshotSerializeTimer !== undefined) {
+      clearTimeout(this.snapshotSerializeTimer);
+      this.snapshotSerializeTimer = undefined;
+    }
+
+    if (this.detachedRootReleaseTimer !== undefined) {
+      clearTimeout(this.detachedRootReleaseTimer);
+      this.detachedRootReleaseTimer = undefined;
+    }
+
+    for (const group of this.collapsedGroups) {
+      group.element.remove();
+    }
+    this.collapsedGroups = [];
+    this.forcedLiveRecordIds.clear();
+    this.preferredLiveOrder = [];
+    this.cleanupInteractionListeners?.();
+    this.cleanupInteractionListeners = undefined;
+
+    for (const record of this.records) {
+      if (!record.mounted) {
+        continue;
+      }
+
+      this.ensureLiveRecord(record);
+      const wrapper = record.rootElement;
+      if (!wrapper?.isConnected) {
+        continue;
+      }
+
+      const parent = wrapper.parentElement;
+      if (!parent) {
+        continue;
+      }
+
+      const elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      while (wrapper.firstChild) {
+        parent.insertBefore(wrapper.firstChild, wrapper);
+      }
+      wrapper.remove();
+
+      record.elements = elements;
+      record.rootElement = null;
+      record.liveRootCache = null;
+      record.mounted = false;
+      record.renderMode = 'collapsed';
+    }
+  }
+
   scrollToRecord(recordId: string): void {
     const record = this.findRecord(recordId);
     const target = record?.rootElement ?? this.findCollapsedGroupForRecord(recordId)?.element;

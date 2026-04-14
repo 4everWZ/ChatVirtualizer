@@ -107,6 +107,8 @@ export interface PageAdapter {
   getConfidence(): number;
   getQuickJumpContainer?(): HTMLElement | null;
   extractQuickJumpText?(target: EventTarget | null): string | null;
+  isEditMessageTrigger?(target: EventTarget | null): boolean;
+  isNativeEditActive?(): boolean;
 }
 
 export interface SnapshotStore {

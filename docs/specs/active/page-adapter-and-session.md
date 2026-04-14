@@ -21,6 +21,7 @@ Only ChatGPT is implemented in the current version.
 - Reindexing is debounced so repeated mutations collapse into a single rebuild window.
 - Same-session tail growth must be handled incrementally when the visible mounted records remain compatible with the previous session state; full rebuild is the fallback, not the default path.
 - Any pending restore work is cancelled when the session token changes.
+- Native ChatGPT edit mode is a temporary unsupported transition. Once an `Edit message` trigger is detected, the session controller must suspend virtualization, unwrap extension-owned live wrappers, remove collapsed groups, and wait until the supported turn contract returns before rebuilding.
 - Session state has two runtime modes:
   - `auto`: keep the most recent `windowSizeQa` stable records mounted, while generating and temporarily protected records may extend the mounted set until they settle.
   - `manual-expanded`: entered after top-triggered restore or site quick-jump expansion; new tail records append without immediately re-collapsing old history.
@@ -62,6 +63,7 @@ Only ChatGPT is implemented in the current version.
 - Session-controller tests must cover bootstrapping threads that start below the QA window and later grow past it without waiting for the full steady-state debounce.
 - Session-controller tests must cover bottom-zone recovery from `manual-expanded` back to `auto`.
 - Session-controller tests must cover descendant busy-node settlement inside an existing turn and confirm re-compression occurs without refresh.
+- Session-controller tests must cover native `Edit message` transitions and confirm virtualization suspends during edit mode, then rebuilds the normal window after edit mode exits.
 - Adapter tests must cover optional quick-jump container discovery and text extraction.
 - Live smoke verification must confirm URL-based session detection on a real ChatGPT conversation.
 - Supported fixtures must include a sidebar `nav[aria-label="Chat history"]` alongside a real thread `div[data-scroll-root]` so false-positive container selection is caught in CI.

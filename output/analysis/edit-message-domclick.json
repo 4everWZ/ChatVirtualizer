@@ -1,0 +1,43 @@
+{
+  "before": {
+    "mounted": 10,
+    "live": 4,
+    "lite": 6,
+    "collapsed": 1,
+    "editButtons": 4
+  },
+  "clickResult": {
+    "clicked": true,
+    "text": "Edit message"
+  },
+  "after": {
+    "mounted": 0,
+    "live": 0,
+    "lite": 0,
+    "collapsed": 1,
+    "textareas": [
+      ""
+    ],
+    "composers": [
+      {
+        "tag": "TEXTAREA",
+        "text": ""
+      },
+      {
+        "tag": "DIV",
+        "text": ""
+      }
+    ],
+    "mountedIndices": []
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 400 ()"
+    },
+    {
+      "type": "info",
+      "text": "Images loaded lazily and replaced with placeholders. Load events are deferred. See https://go.microsoft.com/fwlink/?linkid=2048113"
+    }
+  ]
+}

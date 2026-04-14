@@ -1,0 +1,38 @@
+{
+  "snapshot": {
+    "turnSections": 74,
+    "textareas": [
+      {
+        "placeholder": null,
+        "ariaLabel": "Edit message",
+        "className": "col-start-1 col-end-2 row-start-1 row-end-2 w-full resize-none overflow-hidden p-0 m-0 w-full resize-none border-0 bg-transparent focus:ring-0 focus-visible:ring-0",
+        "value": "怎么样，好看不"
+      },
+      {
+        "placeholder": "Ask anything",
+        "ariaLabel": "Chat with ChatGPT",
+        "className": "wcDTda_fallbackTextarea",
+        "value": ""
+      }
+    ],
+    "threadChildren": [
+      {
+        "tag": "DIV",
+        "className": "composer-parent flex flex-1 flex-col focus-visible:outline-0",
+        "testid": null,
+        "text": "You said:怎么样，好看不怎么样，好看不 CancelSendChatGPT said:好看。 这张图整体是很稳的那种，不是靠夸张妆造取胜，而是靠气质和构图： 脸部很干净，五官柔和，表情自然，属于耐看型 黑色微卷长发配浅色上衣，对比很舒服 窗边的暖光把皮肤和木质背景都衬得很柔和，氛围感很强 穿搭也简洁，米白上衣加"
+      }
+    ],
+    "threadHtml": "<div role=\"presentation\" class=\"composer-parent flex flex-1 flex-col focus-visible:outline-0\"><div class=\"relative basis-auto flex-col -mb-(--composer-overlap-px) pb-(--composer-overlap-px) [--composer-overlap-px:28px] grow flex\"><div class=\"flex flex-col text-sm\"><section class=\"text-token-text-primary w-full focus:outline-none [--shadow-height:45px] has-data-writing-block:pointer-events-none has-data-writing-block:-mt-(--shadow-height) has-data-writing-block:pt-(--shadow-height) [&amp;:has([data-writing-block])&gt;*]:pointer-events-auto R6Vx5W_threadScrollVars scroll-mb-[calc(var(--scroll-root-safe-area-inset-bottom,0px)+var(--thread-response-height))] scroll-mt-(--header-height)\" dir=\"auto\" data-turn-id=\"8dce2696-4bba-4ded-a933-73b40722bb46\" data-testid=\"conversation-turn-1\" data-scroll-anchor=\"false\" data-turn=\"user\"><h4 class=\"sr-only select-none\">You said:</h4><div class=\"text-base my-auto mx-auto pt-3 [--thread-content-margin:var(--thread-content-margin-xs,calc(var(--spacing)*4))] @w-sm/main:[--thread-content-margin:var(--thread-content-margin-sm,calc(var(--spacing)*6))] @w-lg/main:[--thread-content-margin:var(--thread-content-margin-lg,calc(var(--spacing)*16))] px-(--thread-content-margin)\"><div class=\"[--thread-content-max-width:40rem] @w-lg/main:[--thread-content-max-width:48rem] mx-auto max-w-(--thread-content-max-width) flex-1 group/turn-messages focus-visible:outline-hidden mb-10 relative flex w-full min-w-0 flex-col\"><div class=\"bg-token-main-surface-tertiary rounded-3xl px-3 py-3\"><div class=\"flex gap-2 flex-wrap\"><div class=\"relative flex group/file-tile text-token-text-primary relative inline-flex w-(--file-tile-width) min-w-(--file-tile-width) justify-between text-sm [--file-tile-image-size:3.625rem] aspect-square [--file-tile-width:56px]\" role=\"group\" aria-label=\"Generated Image March 24, 2026 - 11_08PM.jpg\"><div class=\"absolute inset-0 z-0 grid\" data-default-action=\"true\"><div class=\"max-h-full min-h-0 w-full justify-self-start\"><span class=\"corner-superellipse/1.1 keyboard-focused:brightness-95 h-full w-full overflow-clip rounded-xl outline-none\"></span></div></div><div class=\"pointer-events-none z-1 max-w-full min-w-0\"></div><div class=\"z-1 flex items-start\"></div></div></div><div class=\"m-2 max-h-[25dvh] overflow-auto\"><div class=\"grid\"><textarea class=\"col-start-1 col-end-2 row-start-1 row-end-2 w-full resize-none overflow-hidden p-0 m-0 w-full resize-none border-0 bg-transparent focus:ring-0 focus-visible:ring-0\" aria-label=\"Edit message\">怎么样，好看不</textarea><span class=\"invisible col-start-1 col-end-2 row-start-1 row-end-2 p-0 break-all whitespace-pre-wrap\">怎么样，好看不 </span></div></div><div class=\"flex justify-end gap-2\"><button class=\"btn relative group-focus-within/dialog:focus-visible:[outline-width:1.5px] group-focus-within/dialog:focus-visible:[outline-offset:2.5px] group-focus-within/dialog:focus-visible:[outline-style:solid] group-focus-within/dialog:focus-visible:[outline-color:var(--text-primary)] btn-secondary\"><div class=\"flex items-center justify-center\">Cancel</div></button><button class=\"btn relative group-focus-within/dialog:focus-visible:[outline-width:1.5px] group-focus-within/dialog:focus-visible:[outline-offset:2.5px] group-focus-within/dialog:focus-visible:[outline-style:solid] group-focus-within/dialog:focus-visible:[outline-color:var(--text-primary)] btn-primary\"><div class=\"flex items-center justify-center\">Send</div></button></div></div></div></div><span class=\"sr-only\"><br></span></section><section class=\"text-token-text-primary w-full focus:outline-none [--shadow-height:45px] has-data-writing-block:pointer-events-none has-data-writing-block:-mt-(--shadow-height) has-data-writing-block:pt-(--shadow-height) [&amp;:has([data-writing-block])&gt;*]:pointer-events-auto [content-visibility:auto] supports-[content-visibility:auto]:[contain-intrinsic-size:auto_100lvh] R6Vx5W_threadScrollVars scroll-mb-[calc(var(--scroll-root-safe-area-inset-bottom,0px)+var(--thread-response-height))] scroll-mt-[calc(var(--header-height)+min(200px,max(70px,20svh)))]\" dir=\"auto\" data-turn-id=\"3512254d-67bf-46a4-87f1-f6ebfcad4bfc\" data-testid=\"conversation-turn-2\" data-scroll-anchor=\"false\" data-turn=\"assistant\"><h4 class=\"sr-only select-none\">ChatGPT said:</h4><div class=\"text-base my-auto mx-auto [--thread-content-margin:var(--thread-content-margin-xs,calc(var(--spacing)*4))] @w-sm/main:[--thread-content-margin:var(--thread-content-margin-sm,calc(var(--spacing)*6))] @w-lg/main:[--thread-content-margin:var(--thread-content-margin-lg,calc(var(--spacing)*16))] px-(--thread-content-margin)\"><div class=\"[--thread-content-max-width:40rem] @w-lg/main:[--thread-content-max-width:48rem] mx-auto max-w-(--thread-content-max-width) flex-1 group/turn-messages focus-visible:outline-hidden relative flex w-full min-w-0 flex-col agent-turn\"><div class=\"flex max-w-full flex-col gap-4 grow\"><div data-message-author-role=\"assistant\" data-message-id=\"652c543e-a268-4b06-9868-1176f88ed5d2\" dir=\"auto\" data-mes"
+  },
+  "consoleMessages": [
+    {
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 400 ()"
+    },
+    {
+      "type": "info",
+      "text": "Images loaded lazily and replaced with placeholders. Load events are deferred. See https://go.microsoft.com/fwlink/?linkid=2048113"
+    }
+  ]
+}

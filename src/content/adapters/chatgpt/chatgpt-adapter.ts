@@ -19,6 +19,8 @@ export const CHATGPT_TURN_SELECTORS = [
 
 const DIRECT_SCROLL_SELECTORS = ['[data-scroll-root]', '[data-ecv-scroll-container]', '[data-testid="conversation-turns"]'].join(', ');
 const QUICK_JUMP_CONTAINER_SELECTOR = '.fixed.end-4.top-1\\/2.z-20.-translate-y-1\\/2';
+const EDIT_MESSAGE_BUTTON_SELECTOR = 'button[aria-label="Edit message"]';
+const EDIT_MESSAGE_TEXTAREA_SELECTOR = 'textarea[aria-label="Edit message"]';
 const LOCATION_CHANGE_EVENT = 'ecv:locationchange';
 const HISTORY_PATCH_STATE_KEY = '__ecvHistoryPatchState__';
 
@@ -156,6 +158,14 @@ export class ChatGptPageAdapter implements PageAdapter {
 
     const item = target.closest<HTMLElement>('button, a, [role="button"], [data-quick-jump-item]');
     return item?.textContent?.replace(/\s+/g, ' ').trim() || null;
+  }
+
+  isEditMessageTrigger(target: EventTarget | null): boolean {
+    return target instanceof HTMLElement && target.closest(EDIT_MESSAGE_BUTTON_SELECTOR) !== null;
+  }
+
+  isNativeEditActive(): boolean {
+    return this.rootDocument.querySelector(EDIT_MESSAGE_TEXTAREA_SELECTOR) !== null;
   }
 
   private collectTurnCandidatesInternal(scrollContainer: HTMLElement | null): HTMLElement[] {

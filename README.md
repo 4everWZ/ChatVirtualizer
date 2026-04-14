@@ -20,6 +20,7 @@
 - Preserve manually restored older history until the user returns near the bottom of the conversation
 - Restore older history when the user reaches the top of the chat container
 - Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
+- Suspend virtualization during ChatGPT's native `Edit message` flow, then rebuild the normal window after edit mode exits
 - Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
 - Keep collapsed DOM roots only briefly for same-session fast restore, then fall back to lightweight snapshots for lower memory retention
 - Expose popup stats and options for runtime configuration
@@ -154,4 +155,5 @@ The current repository is wired to verify through:
 - Snapshot restore targets reading fidelity, not full site-internal component behavior parity
 - Released collapsed history restores as lightweight reading-state DOM, so old turn toolbars and similar interaction chrome are intentionally not preserved
 - Older visible records inside the mounted window also use lightweight reading-state DOM, so only the hottest subset keeps full ChatGPT turn chrome by default
+- Native `Edit message` temporarily drops extension-owned collapsed groups and wrappers so ChatGPT can own the edit DOM; the virtualized window is rebuilt after edit mode exits
 - The fixture browser suite verifies popup stats and native-find restore behavior; real signed-in ChatGPT validation is still an explicit optional step

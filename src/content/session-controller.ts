@@ -36,10 +36,13 @@ export class SessionController {
   private scrollContainer: HTMLElement | null = null;
   private isApplyingDomChanges = false;
   private initializationTimer?: number;
+  private cleanupEditModeListener?: () => void;
   private cleanupQuickJumpListener?: () => void;
   private cleanupScrollModeListener?: () => void;
+  private nativeEditActive = false;
   private reindexTimer?: number;
   private phaseSettleTimer?: number;
+  private suspendedForNativeEdit = false;
   private virtualizer?: VirtualizationEngine;
 
   constructor(options: SessionControllerOptions = {}) {
@@ -72,6 +75,8 @@ export class SessionController {
     this.activationCheckQueued = false;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
     this.cleanupQuickJumpListener?.();
     this.cleanupQuickJumpListener = undefined;
     this.cleanupScrollModeListener?.();
@@ -79,10 +84,7 @@ export class SessionController {
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
 
-    if (this.reindexTimer !== undefined) {
-      clearTimeout(this.reindexTimer);
-      this.reindexTimer = undefined;
-    }
+    this.clearReindexTimer();
 
     this.clearPhaseSettleTimer();
 
@@ -90,6 +92,9 @@ export class SessionController {
       clearTimeout(this.initializationTimer);
       this.initializationTimer = undefined;
     }
+
+    this.nativeEditActive = false;
+    this.suspendedForNativeEdit = false;
   }
 
   getStats() {
@@ -105,6 +110,31 @@ export class SessionController {
   }
 
   private async ensureSessionStarted(): Promise<void> {
+    const nativeEditDetected = this.adapter.isNativeEditActive?.() ?? false;
+    if (nativeEditDetected && !this.suspendedForNativeEdit && this.currentSessionState && this.virtualizer) {
+      this.enterNativeEditMode();
+    }
+
+    if (this.suspendedForNativeEdit) {
+      if (nativeEditDetected) {
+        this.nativeEditActive = true;
+        this.armActivationWatcher();
+        await this.publishStats();
+        return;
+      }
+
+      this.nativeEditActive = false;
+      if (!this.adapter.canHandlePage()) {
+        this.armActivationWatcher();
+        await this.publishStats();
+        return;
+      }
+
+      this.armActivationWatcher();
+      this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS);
+      return;
+    }
+
     if (!this.adapter.canHandlePage()) {
       this.clearInitializationTimer();
       this.resetSessionState();
@@ -123,6 +153,13 @@ export class SessionController {
   }
 
   private async initializeSession(): Promise<void> {
+    if (this.adapter.isNativeEditActive?.()) {
+      this.enterNativeEditMode();
+      this.armActivationWatcher();
+      await this.publishStats();
+      return;
+    }
+
     const sessionId = this.adapter.getSessionId();
     const scrollContainer = this.adapter.getScrollContainer();
     if (!scrollContainer) {
@@ -175,10 +212,13 @@ export class SessionController {
   private resetSessionState(): void {
     this.clearInitializationTimer();
     this.clearPhaseSettleTimer();
+    this.clearReindexTimer();
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
     this.cleanupQuickJumpListener?.();
     this.cleanupQuickJumpListener = undefined;
     this.cleanupScrollModeListener?.();
@@ -189,6 +229,8 @@ export class SessionController {
     this.currentSessionState = undefined;
     this.records = [];
     this.scrollContainer = null;
+    this.nativeEditActive = false;
+    this.suspendedForNativeEdit = false;
   }
 
   private queueActivationCheck(): void {
@@ -221,6 +263,15 @@ export class SessionController {
     this.initializationTimer = undefined;
   }
 
+  private clearReindexTimer(): void {
+    if (this.reindexTimer === undefined) {
+      return;
+    }
+
+    clearTimeout(this.reindexTimer);
+    this.reindexTimer = undefined;
+  }
+
   private observeMutations(): void {
     this.mutationObserver?.disconnect();
     if (!this.scrollContainer) {
@@ -232,13 +283,16 @@ export class SessionController {
         return;
       }
 
+      if (this.nativeEditActive || this.suspendedForNativeEdit) {
+        this.queueActivationCheck();
+        return;
+      }
+
       if (!mutations.some((mutation) => isRelevantTurnMutation(mutation))) {
         return;
       }
 
-      if (this.reindexTimer !== undefined) {
-        clearTimeout(this.reindexTimer);
-      }
+      this.clearReindexTimer();
 
       const quietMs = this.currentSessionState?.phase === 'bootstrapping' ? INITIAL_ACTIVATION_QUIET_MS : this.config.stabilityQuietMs;
       this.reindexTimer = window.setTimeout(() => {
@@ -328,6 +382,8 @@ export class SessionController {
   ): Promise<void> {
     this.scrollContainer = scrollContainer;
     this.records = records;
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
     if (this.virtualizer) {
       void this.virtualizer.persistCollapsedSnapshots();
       this.virtualizer.dispose();
@@ -358,6 +414,8 @@ export class SessionController {
       windowMode,
       phase
     };
+    this.nativeEditActive = false;
+    this.suspendedForNativeEdit = false;
     this.syncSessionState();
     if (phase === 'bootstrapping') {
       if (this.phaseSettleTimer === undefined) {
@@ -375,6 +433,7 @@ export class SessionController {
 
     this.installScrollModeListener(scrollContainer);
     this.installQuickJumpListener();
+    this.installEditModeListener();
     this.observeMutations();
     await this.publishStats();
   }
@@ -484,6 +543,28 @@ export class SessionController {
     };
   }
 
+  private installEditModeListener(): void {
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
+
+    if (!this.adapter.isEditMessageTrigger) {
+      return;
+    }
+
+    const onClick = (event: Event) => {
+      if (!this.adapter.isEditMessageTrigger?.(event.target)) {
+        return;
+      }
+
+      this.enterNativeEditMode();
+    };
+
+    document.addEventListener('click', onClick, true);
+    this.cleanupEditModeListener = () => {
+      document.removeEventListener('click', onClick, true);
+    };
+  }
+
   private findQuickJumpMatch(rawText: string): { recordId: string; mounted: boolean } | null {
     const query = normalizeQuickJumpText(rawText);
     if (query.length < 4) {
@@ -578,6 +659,33 @@ export class SessionController {
     }
 
     this.currentSessionState.windowMode = windowMode;
+  }
+
+  private enterNativeEditMode(): void {
+    if (this.suspendedForNativeEdit || !this.currentSessionState || !this.virtualizer) {
+      return;
+    }
+
+    this.nativeEditActive = true;
+    this.suspendedForNativeEdit = true;
+    this.clearInitializationTimer();
+    this.clearReindexTimer();
+    this.clearPhaseSettleTimer();
+    this.mutationObserver?.disconnect();
+    this.mutationObserver = undefined;
+    this.scrollManager?.disconnect();
+    this.scrollManager = undefined;
+    this.cleanupEditModeListener?.();
+    this.cleanupEditModeListener = undefined;
+    this.cleanupQuickJumpListener?.();
+    this.cleanupQuickJumpListener = undefined;
+    this.cleanupScrollModeListener?.();
+    this.cleanupScrollModeListener = undefined;
+    this.virtualizer.suspendForNativeEdit();
+    this.records = this.virtualizer.getRecords();
+    this.syncSessionState();
+    this.armActivationWatcher();
+    void this.publishStats();
   }
 
   private armSteadyPhaseTimer(): void {
