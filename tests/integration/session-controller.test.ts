@@ -306,6 +306,7 @@ class DynamicChatGptAdapter implements PageAdapter {
 class EditableChatGptAdapter implements PageAdapter {
   private readonly scrollRoot: HTMLElement;
   private readonly thread: HTMLElement;
+  private readonly hostNoiseRoot: HTMLElement;
   private readonly records: Array<{ question: string; answer: string }> = [];
   private editActive = false;
 
@@ -321,7 +322,10 @@ class EditableChatGptAdapter implements PageAdapter {
     this.thread.id = 'thread';
     main.append(this.thread);
     this.scrollRoot.append(main);
+    this.hostNoiseRoot = document.createElement('div');
+    this.hostNoiseRoot.dataset.hostNoise = '';
     document.body.append(this.scrollRoot);
+    document.body.append(this.hostNoiseRoot);
 
     for (let index = 1; index <= initialQaCount; index += 1) {
       this.records.push({
@@ -438,8 +442,34 @@ class EditableChatGptAdapter implements PageAdapter {
     }, delayMs);
   }
 
+  submitEditWithSinglePassRecoverySlice(delayMs: number, startIndex: number, count: number): void {
+    window.setTimeout(() => {
+      this.editActive = false;
+      this.records[0] = {
+        question: 'Edited Question 1',
+        answer: 'Replacement Answer 1'
+      };
+      this.renderConversationSlice(startIndex, count);
+    }, delayMs);
+  }
+
   restoreFullConversation(): void {
     this.renderConversation();
+  }
+
+  startHostNoise(iterations: number, intervalMs: number): void {
+    const tick = (remaining: number) => {
+      this.hostNoiseRoot.textContent = `noise-${remaining}`;
+      if (remaining <= 1) {
+        return;
+      }
+
+      window.setTimeout(() => {
+        tick(remaining - 1);
+      }, intervalMs);
+    };
+
+    tick(iterations);
   }
 
   private enterEditMode(): void {
@@ -479,6 +509,201 @@ class EditableChatGptAdapter implements PageAdapter {
         createTurn(`conversation-turn-${assistantTurnIndex}`, `turn-${assistantTurnIndex}`, 'assistant', 'ChatGPT said:', record.answer)
       );
     });
+  }
+}
+
+class ReplacingScrollRootAdapter implements PageAdapter {
+  private scrollRoot: HTMLElement;
+  private thread: HTMLElement;
+  private readonly records: Array<{ question: string; answer: string }> = [];
+
+  constructor(initialQaCount: number) {
+    for (let index = 1; index <= initialQaCount; index += 1) {
+      this.records.push({
+        question: `Question ${index}`,
+        answer: `Answer ${index}`
+      });
+    }
+
+    const mounted = this.mountFreshScrollRoot();
+    this.scrollRoot = mounted.scrollRoot;
+    this.thread = mounted.thread;
+  }
+
+  canHandlePage(): boolean {
+    return this.collectTurnCandidates().length >= 2;
+  }
+
+  getSessionId(): string {
+    return 'replacing-scroll-root-session';
+  }
+
+  getScrollContainer(): HTMLElement | null {
+    return this.scrollRoot;
+  }
+
+  collectTurnCandidates(): TurnCandidate[] {
+    return Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-testid^="conversation-turn-"]')).map((element) => ({
+      id: element.dataset.turnId ?? 'missing-turn-id',
+      role: element.dataset.turn as TurnRole,
+      text: element.textContent?.trim() ?? '',
+      element
+    }));
+  }
+
+  observeSessionChanges(): () => void {
+    return () => undefined;
+  }
+
+  getConfidence(): number {
+    return 0.9;
+  }
+
+  replaceScrollRootPreservingConversation(): void {
+    this.scrollRoot.remove();
+    const mounted = this.mountFreshScrollRoot();
+    this.scrollRoot = mounted.scrollRoot;
+    this.thread = mounted.thread;
+  }
+
+  private mountFreshScrollRoot(): { scrollRoot: HTMLElement; thread: HTMLElement } {
+    const scrollRoot = document.createElement('div');
+    scrollRoot.dataset.scrollRoot = '';
+    scrollRoot.style.height = '800px';
+    scrollRoot.style.overflowY = 'auto';
+
+    const main = document.createElement('main');
+    main.id = 'main';
+    const thread = document.createElement('div');
+    thread.id = 'thread';
+    main.append(thread);
+    scrollRoot.append(main);
+    document.body.append(scrollRoot);
+
+    this.records.forEach((record, index) => {
+      const userTurnIndex = index * 2 + 1;
+      const assistantTurnIndex = userTurnIndex + 1;
+      thread.append(
+        createTurn(`conversation-turn-${userTurnIndex}`, `turn-${userTurnIndex}`, 'user', 'You said:', record.question),
+        createTurn(`conversation-turn-${assistantTurnIndex}`, `turn-${assistantTurnIndex}`, 'assistant', 'ChatGPT said:', record.answer)
+      );
+    });
+
+    return {
+      scrollRoot,
+      thread
+    };
+  }
+}
+
+class SwitchableSessionAdapter implements PageAdapter {
+  private currentSessionId = 'switch-session-a';
+  private scrollRoot: HTMLElement | null = null;
+  private thread: HTMLElement | null = null;
+  private readonly callbacks = new Set<() => void>();
+
+  constructor(initialQaCount: number) {
+    this.renderSession(initialQaCount);
+  }
+
+  canHandlePage(): boolean {
+    return this.collectTurnCandidates().length >= 2;
+  }
+
+  getSessionId(): string {
+    return this.currentSessionId;
+  }
+
+  getScrollContainer(): HTMLElement | null {
+    return this.scrollRoot;
+  }
+
+  collectTurnCandidates(): TurnCandidate[] {
+    if (!this.thread) {
+      return [];
+    }
+
+    return Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-testid^="conversation-turn-"]')).map((element) => ({
+      id: element.dataset.turnId ?? 'missing-turn-id',
+      role: element.dataset.turn as TurnRole,
+      text: element.textContent?.trim() ?? '',
+      element
+    }));
+  }
+
+  observeSessionChanges(callback: () => void): () => void {
+    this.callbacks.add(callback);
+    return () => {
+      this.callbacks.delete(callback);
+    };
+  }
+
+  getConfidence(): number {
+    return 0.9;
+  }
+
+  switchSession(nextSessionId: string): void {
+    this.currentSessionId = nextSessionId;
+    window.history.replaceState({}, '', `/c/${nextSessionId}`);
+    this.emitChange();
+    this.clearDom();
+  }
+
+  switchSessionWithoutCallback(nextSessionId: string): void {
+    this.currentSessionId = nextSessionId;
+    window.history.replaceState({}, '', `/c/${nextSessionId}`);
+    this.clearDom();
+  }
+
+  renderCurrentSession(qaCount: number): void {
+    this.renderSession(qaCount);
+  }
+
+  private renderSession(qaCount: number): void {
+    this.clearDom();
+
+    const scrollRoot = document.createElement('div');
+    scrollRoot.dataset.scrollRoot = '';
+    scrollRoot.style.height = '800px';
+    scrollRoot.style.overflowY = 'auto';
+
+    const main = document.createElement('main');
+    main.id = 'main';
+    const thread = document.createElement('div');
+    thread.id = 'thread';
+    main.append(thread);
+    scrollRoot.append(main);
+    document.body.append(scrollRoot);
+
+    for (let index = 1; index <= qaCount; index += 1) {
+      const userTurnIndex = index * 2 - 1;
+      const assistantTurnIndex = userTurnIndex + 1;
+      thread.append(
+        createTurn(`conversation-turn-${userTurnIndex}`, `${this.currentSessionId}-turn-${userTurnIndex}`, 'user', 'You said:', `Question ${index}`),
+        createTurn(
+          `conversation-turn-${assistantTurnIndex}`,
+          `${this.currentSessionId}-turn-${assistantTurnIndex}`,
+          'assistant',
+          'ChatGPT said:',
+          `Answer ${index}`
+        )
+      );
+    }
+
+    this.scrollRoot = scrollRoot;
+    this.thread = thread;
+  }
+
+  private clearDom(): void {
+    this.scrollRoot?.remove();
+    this.scrollRoot = null;
+    this.thread = null;
+  }
+
+  private emitChange(): void {
+    for (const callback of this.callbacks) {
+      callback();
+    }
   }
 }
 
@@ -1034,10 +1259,6 @@ describe('session controller', () => {
       expect(controller.getStats().totalRecords).toBe(12);
 
       await vi.advanceTimersByTimeAsync(500);
-      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
-      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
-
-      await vi.advanceTimersByTimeAsync(700);
       await vi.waitFor(() => {
         expect(adapter.isNativeEditActive()).toBe(false);
         expect(controller.getStats().mountedCount).toBe(10);
@@ -1085,7 +1306,7 @@ describe('session controller', () => {
       expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
       expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
 
-      await vi.advanceTimersByTimeAsync(1_500);
+      await vi.advanceTimersByTimeAsync(1_000);
       await vi.waitFor(() => {
         expect(adapter.isNativeEditActive()).toBe(false);
         expect(controller.getStats().mountedCount).toBe(10);
@@ -1204,6 +1425,154 @@ describe('session controller', () => {
     }
   });
 
+  test('recovers from native edit when ChatGPT only restores a smaller tail slice after scrolling to the bottom', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-tail-slice-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.submitEditWithPartialRecovery(600, 6, 7);
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelector('[data-record-id="editable-session:record:12"]')).not.toBeNull();
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('recovers when edit mode exits directly into a smaller tail slice without a second mutation batch', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-single-pass-tail-slice-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.submitEditWithSinglePassRecoverySlice(600, 6, 7);
+      await vi.advanceTimersByTimeAsync(700);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('recovers from native edit even while unrelated host mutations keep firing during post-edit recovery', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-recovery-churn-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.clickFirstEditButton();
+      await vi.advanceTimersByTimeAsync(0);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+      });
+
+      adapter.finishEditModeWithVisibleSlice(3, 10);
+      adapter.startHostNoise(30, 100);
+
+      await vi.advanceTimersByTimeAsync(1_500);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
   test('re-suspends when the recovered thread is cleared again before ChatGPT finishes rebuilding', async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '';
@@ -1266,6 +1635,128 @@ describe('session controller', () => {
     } finally {
       controller.stop();
       vi.useRealTimers();
+    }
+  });
+
+  test('recovers when ChatGPT replaces the active scroll container and keeps stats in sync with the visible thread', async () => {
+    document.body.innerHTML = '';
+    const adapter = new ReplacingScrollRootAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-scroll-root-replacement-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(12);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.replaceScrollRootPreservingConversation();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(12);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('resets session stats promptly on route change instead of keeping the previous thread active while the next one loads', async () => {
+    document.body.innerHTML = '';
+    const adapter = new SwitchableSessionAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-session-switch-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-a');
+        expect(controller.getStats().totalRecords).toBe(12);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.switchSession('switch-session-b');
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-b');
+        expect(controller.getStats().totalRecords).toBe(0);
+        expect(controller.getStats().mountedCount).toBe(0);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+      });
+
+      adapter.renderCurrentSession(6);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-b');
+        expect(controller.getStats().totalRecords).toBe(6);
+        expect(controller.getStats().mountedCount).toBe(6);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('falls back to DOM health recovery when the route changes but no explicit session-change callback fires', async () => {
+    document.body.innerHTML = '';
+    const adapter = new SwitchableSessionAdapter(12);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-session-switch-health-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-a');
+        expect(controller.getStats().totalRecords).toBe(12);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      adapter.switchSessionWithoutCallback('switch-session-b');
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-b');
+        expect(controller.getStats().totalRecords).toBe(0);
+        expect(controller.getStats().mountedCount).toBe(0);
+      });
+
+      adapter.renderCurrentSession(6);
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().sessionId).toBe('switch-session-b');
+        expect(controller.getStats().totalRecords).toBe(6);
+        expect(controller.getStats().mountedCount).toBe(6);
+      });
+    } finally {
+      controller.stop();
     }
   });
 });

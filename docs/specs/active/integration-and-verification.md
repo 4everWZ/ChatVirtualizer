@@ -22,8 +22,10 @@ The system is assembled around a session controller that coordinates adapter dis
 - Post-edit recovery must not trust the first supported DOM subtree blindly. If the returned turns can be merged against the preserved pre-edit records, the controller may resume virtualization; if the returned DOM is still obviously partial, the controller must remain suspended and wait for more DOM evidence instead of rebuilding a corrupt window.
 - If ChatGPT clears the recovered DOM again during the same post-edit transition, the controller must treat that as renewed instability, re-suspend virtualization, and wait for a later safe recovery point rather than keeping stale mounted state.
 - Window application must never evict the entire currently visible record set unless at least one replacement record has already been kept or restored successfully. A bad or partial plan is allowed to degrade to "keep the current window" but not to a blank thread with only collapsed history chrome.
+- If ChatGPT replaces the active scroll root or mounted record subtree without a clean session-change callback, DOM-health recovery must still detect the loss, clear stale mounted bookkeeping, and rebuild or suspend safely.
 - Background, popup, and options communicate only through typed runtime messages.
 - Popup stats must query the active content tab first and use background state only as a fallback when MV3 worker suspension has dropped cached state.
+- When the active content tab is mid-navigation and direct tab messaging is unavailable or still returning an empty/unstable thread, popup-visible stats must prefer the current tab URL's conversation id with zeroed counts over stale cached stats from the previous conversation.
 - Storage access is asynchronous and must never block DOM mutation handling on the hot path.
 - Live ChatGPT adapter logic must prefer outer `section[data-testid^="conversation-turn-"][data-turn]` roots over nested `[data-message-author-role]` descendants so real message DOM is not double-counted.
 - Site-owned quick-jump rails are optional integrations. If a rail is present, delegated click handling may restore a collapsed target range; if the rail is absent or ambiguous, native site behavior must remain untouched.
@@ -43,6 +45,7 @@ The system is assembled around a session controller that coordinates adapter dis
 - Session-controller tests must assert that site quick-jump clicks restore collapsed targets only on unique high-confidence matches.
 - Session-controller tests must assert that native `Edit message` removes extension-owned wrappers and collapsed groups during edit mode, restores preserved history when cancel only re-renders the current window, and refuses to rebuild when post-send DOM is still an incomplete fragment.
 - Session-controller tests must also assert that post-edit DOM loss after an initial recovery attempt forces a second suspension instead of leaving stale mounted stats or orphaned collapsed groups behind.
+- Session-controller tests must assert that host-owned scroll-root replacement and DOM-only route drift recover to the right session instead of leaving a blank thread with stale counts.
 - Virtualization tests must assert that direct interaction with a visible `lite` record promotes it back into the live subset and demotes the oldest unprotected hot record.
 - Virtualization tests must assert that a failed replacement restore cannot evict the entire visible window.
 - Real-page A/B debugging must compare the same conversation with the extension disabled and enabled before performance claims are treated as fixed.

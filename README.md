@@ -17,6 +17,7 @@
 - Split the mounted QA window into a lightweight reading subset plus a small hot live subset, so the newest four records keep full ChatGPT DOM while older visible records are downgraded to lighter reading-state wrappers
 - Auto-compress the same conversation back to the latest 10 stable QA records as new turns arrive, without requiring a page refresh
 - Ignore transient mid-thread hydration busy markers so historical assistant messages do not get pinned in the mounted window
+- Recover when ChatGPT replaces the active thread or scroll container, instead of leaving a blank page with stale mounted-state bookkeeping
 - Preserve manually restored older history until the user returns near the bottom of the conversation
 - Restore older history when the user reaches the top of the chat container
 - Expand collapsed history when ChatGPT's site-owned quick-jump rail targets an older collapsed record
@@ -25,6 +26,7 @@
 - Support native browser find on collapsed history via `hidden="until-found"` reservoirs and `beforematch` restore
 - Keep collapsed DOM roots only briefly for same-session fast restore, then fall back to lightweight snapshots for lower memory retention
 - Expose popup stats and options for runtime configuration
+- Report prompt session fallback stats during thread navigation so the popup does not keep showing the previous conversation while the next one is still loading
 - Degrade safely when the page structure is unsupported
 - Stay event-driven end to end; no timer polling, busy waits, or CPU spin loops are allowed in runtime behavior
 - Use a short first-pass activation quiet window for live ChatGPT bootstrap, while keeping `stabilityQuietMs` for steady-state reindex debounce

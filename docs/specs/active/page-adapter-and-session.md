@@ -19,6 +19,7 @@ Only ChatGPT is implemented in the current version.
 - The first supported-thread bootstrap must use a short activation quiet window so initial compression begins soon after the thread contract appears; the longer `stabilityQuietMs` debounce is reserved for later same-session reindex work.
 - Session change detection must be event-driven through DOM mutation and History API hooks; timer polling, dead loops, busy waits, and CPU spin are forbidden.
 - Reindexing is debounced so repeated mutations collapse into a single rebuild window.
+- Live ChatGPT can replace the active scroll container or thread subtree without a clean adapter-level session-change signal. Session control must therefore keep a DOM-health path that can detect route/session drift or host-owned subtree loss and recover without polling.
 - Same-session tail growth must be handled incrementally when the visible mounted records remain compatible with the previous session state; full rebuild is the fallback, not the default path.
 - Any pending restore work is cancelled when the session token changes.
 - Native ChatGPT edit mode is a temporary unsupported transition. Once an `Edit message` trigger is detected, the session controller must suspend virtualization immediately, even if the first virtualization pass has not attached yet. After edit exit, the controller may rebuild only when the returning DOM is either merge-safe against the preserved pre-edit record set or close to a full-thread rebuild; a clearly partial subtree must keep the controller suspended.
@@ -60,6 +61,8 @@ Only ChatGPT is implemented in the current version.
 - Adapter tests must assert that live outer turn sections win over nested author-role descendants when both exist in the DOM.
 - Session-controller tests must assert that historical hydrate-busy assistant turns do not prevent the auto window from collapsing to the latest 10 QA records.
 - Session-controller tests must cover same-session incremental growth beyond the 10-record window without a page refresh.
+- Session-controller tests must cover host replacement of the active scroll container and confirm the controller rebuilds the visible window instead of leaving blank content with stale mounted stats.
+- Session-controller tests must cover route/session drift that arrives only through DOM health signals and confirm popup-visible stats switch to the new session promptly.
 - Session-controller tests must cover bootstrapping threads that start below the QA window and later grow past it without waiting for the full steady-state debounce.
 - Session-controller tests must cover bottom-zone recovery from `manual-expanded` back to `auto`.
 - Session-controller tests must cover descendant busy-node settlement inside an existing turn and confirm re-compression occurs without refresh.

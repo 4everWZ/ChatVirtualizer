@@ -7,7 +7,7 @@ const configStore = new ConfigStore();
 const snapshotStore = new IndexedDbSnapshotStore();
 const statsByTab = new Map<number, SessionStats>();
 
-chrome.runtime.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
+globalThis.chrome?.runtime?.onMessage.addListener((message: RuntimeMessage, sender, sendResponse) => {
   void (async () => {
     switch (message.type) {
       case 'session-stats':
@@ -49,7 +49,7 @@ async function getActiveSessionStats(): Promise<SessionStats | undefined> {
       type: 'get-active-session-stats'
     } satisfies RuntimeMessage)) as SessionStats | undefined;
   } catch {
-    return statsByTab.get(targetTab.id);
+    return derivePendingSessionStatsFromTab(targetTab) ?? statsByTab.get(targetTab.id);
   }
 }
 
@@ -77,5 +77,29 @@ function isContentTab(tab: chrome.tabs.Tab): boolean {
     );
   } catch {
     return false;
+  }
+}
+
+export function derivePendingSessionStatsFromTab(tab: chrome.tabs.Tab): SessionStats | undefined {
+  if (!tab.url) {
+    return undefined;
+  }
+
+  try {
+    const url = new URL(tab.url);
+    if (!(url.hostname === 'chatgpt.com' || url.hostname === 'chat.openai.com')) {
+      return undefined;
+    }
+
+    const sessionIdMatch = url.pathname.match(/\/c\/([^/]+)/);
+    return {
+      adapterConfidence: 0,
+      collapsedGroupCount: 0,
+      mountedCount: 0,
+      sessionId: sessionIdMatch?.[1] ?? 'No active conversation',
+      totalRecords: 0
+    };
+  } catch {
+    return undefined;
   }
 }

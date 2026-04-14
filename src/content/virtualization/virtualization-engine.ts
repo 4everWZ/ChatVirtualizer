@@ -176,11 +176,28 @@ export class VirtualizationEngine {
   }
 
   getCollapsedGroupCount(): number {
-    return this.collapsedGroups.length;
+    return this.collapsedGroups.filter((group) => group.element.isConnected).length;
   }
 
   getRecords(): QARecord[] {
     return this.records;
+  }
+
+  primeMountedSnapshots(): void {
+    for (const record of this.records) {
+      if (!record.mounted || !record.rootElement) {
+        continue;
+      }
+
+      if (record.snapshotHtml) {
+        continue;
+      }
+
+      const snapshot = this.createSnapshot(record, record.rootElement);
+      this.snapshotCache.set(record.id, snapshot);
+      record.snapshotHtml = snapshot.html;
+      this.queueSnapshotPersist(snapshot);
+    }
   }
 
   clearForcedLiveRecordIds(): void {
@@ -409,7 +426,21 @@ export class VirtualizationEngine {
       return true;
     }
 
-    const snapshot = this.snapshotCache.get(record.id) ?? (await this.snapshotStore.getSnapshot(record.sessionId, record.id));
+    const snapshot =
+      this.snapshotCache.get(record.id) ??
+      (record.snapshotHtml
+        ? {
+            anchorSignature: record.anchorSignature ?? record.textCombined.slice(0, 80),
+            createdAt: 0,
+            height: record.height,
+            html: record.snapshotHtml,
+            recordId: record.id,
+            sessionId: record.sessionId,
+            textCombined: record.textCombined,
+            updatedAt: 0
+          }
+        : undefined) ??
+      (await this.snapshotStore.getSnapshot(record.sessionId, record.id));
     if (!snapshot) {
       return false;
     }

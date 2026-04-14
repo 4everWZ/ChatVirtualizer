@@ -2,7 +2,7 @@ import { CHATGPT_TURN_SELECTORS, ChatGptPageAdapter } from '@/content/adapters/c
 import { buildQaRecordsFromTurns } from '@/content/records/record-engine';
 import { ScrollManager } from '@/content/scroll/scroll-manager';
 import { VirtualizationEngine } from '@/content/virtualization/virtualization-engine';
-import { getTopRestoreRange } from '@/content/virtualization/window-manager';
+import { computeWindowPlan, getTopRestoreRange } from '@/content/virtualization/window-manager';
 import { DEFAULT_CONFIG, mergeConfig } from '@/shared/config';
 import { createRecordId } from '@/shared/ids';
 import type { ExtensionConfig, PageAdapter, QARecord, SessionState } from '@/shared/contracts';
@@ -18,6 +18,7 @@ interface SessionControllerOptions {
 }
 
 const INITIAL_ACTIVATION_QUIET_MS = 250;
+const MIN_TAIL_RECOVERY_RECORDS = 3;
 type InitializationMode = 'session-init' | 'native-edit-recovery';
 
 export class SessionController {
@@ -30,6 +31,10 @@ export class SessionController {
   private mutationObserver?: MutationObserver;
   private activationObserver?: MutationObserver;
   private activationCheckQueued = false;
+  private nativeEditRecoveryQueued = false;
+  private awaitingNativeEditTransition = false;
+  private healthObserver?: MutationObserver;
+  private healthCheckQueued = false;
   private scrollManager?: ScrollManager;
   private cleanupSessionObserver?: () => void;
   private currentSessionState?: SessionState;
@@ -42,6 +47,8 @@ export class SessionController {
   private cleanupQuickJumpListener?: () => void;
   private cleanupScrollModeListener?: () => void;
   private nativeEditActive = false;
+  private nativeEditAnchorRecordIndex: number | null = null;
+  private nativeEditComposerSeen = false;
   private nativeEditRecoveryRecords: QARecord[] | null = null;
   private reindexTimer?: number;
   private phaseSettleTimer?: number;
@@ -61,7 +68,7 @@ export class SessionController {
     globalThis.chrome?.runtime?.onMessage.addListener(this.handleRuntimeMessage);
 
     this.cleanupSessionObserver = this.adapter.observeSessionChanges(() => {
-      void this.ensureSessionStarted();
+      void this.handleObservedSessionChange();
     });
 
     await this.ensureSessionStarted();
@@ -76,6 +83,11 @@ export class SessionController {
     this.activationObserver?.disconnect();
     this.activationObserver = undefined;
     this.activationCheckQueued = false;
+    this.nativeEditRecoveryQueued = false;
+    this.awaitingNativeEditTransition = false;
+    this.healthObserver?.disconnect();
+    this.healthObserver = undefined;
+    this.healthCheckQueued = false;
     this.scrollManager?.disconnect();
     this.scrollManager = undefined;
     this.cleanupEditModeListener?.();
@@ -97,6 +109,8 @@ export class SessionController {
     }
 
     this.nativeEditActive = false;
+    this.nativeEditAnchorRecordIndex = null;
+    this.nativeEditComposerSeen = false;
     this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
   }
@@ -107,7 +121,7 @@ export class SessionController {
     return {
       adapterConfidence: this.adapter.canHandlePage() ? this.adapter.getConfidence() : 0,
       collapsedGroupCount: this.virtualizer?.getCollapsedGroupCount() ?? 0,
-      mountedCount: this.records.filter((record) => record.mounted).length,
+      mountedCount: this.records.filter((record) => record.mounted && record.rootElement?.isConnected).length,
       sessionId: this.currentSessionState?.sessionId ?? (isConversationPath ? this.adapter.getSessionId() : 'No active conversation'),
       totalRecords: this.records.length
     };
@@ -120,8 +134,18 @@ export class SessionController {
     }
 
     if (this.suspendedForNativeEdit) {
+      this.logger.warn('native-edit gate', {
+        awaitingNativeEditTransition: this.awaitingNativeEditTransition,
+        canHandlePage: this.adapter.canHandlePage(),
+        nativeEditComposerSeen: this.nativeEditComposerSeen,
+        nativeEditDetected,
+        preservedRecordCount: this.nativeEditRecoveryRecords?.length ?? this.records.length,
+        sessionId: this.adapter.getSessionId()
+      });
       if (nativeEditDetected) {
         this.nativeEditActive = true;
+        this.nativeEditComposerSeen = true;
+        this.awaitingNativeEditTransition = false;
         this.clearInitializationTimer();
         this.armActivationWatcher();
         await this.publishStats();
@@ -129,6 +153,16 @@ export class SessionController {
       }
 
       this.nativeEditActive = false;
+      if (this.awaitingNativeEditTransition) {
+        this.awaitingNativeEditTransition = false;
+        this.clearInitializationTimer();
+        this.armActivationWatcher();
+        if (!this.nativeEditComposerSeen) {
+          await this.publishStats();
+          return;
+        }
+      }
+
       if (!this.adapter.canHandlePage()) {
         this.clearInitializationTimer();
         this.armActivationWatcher();
@@ -136,8 +170,20 @@ export class SessionController {
         return;
       }
 
+      if ((this.nativeEditRecoveryRecords?.length ?? 0) === 0) {
+        this.nativeEditActive = false;
+        this.suspendedForNativeEdit = false;
+        this.awaitingNativeEditTransition = false;
+        this.clearInitializationTimer();
+        this.armActivationWatcher();
+        this.scheduleInitialization(this.config.stabilityQuietMs, 'session-init');
+        await this.publishStats();
+        return;
+      }
+
+      this.clearInitializationTimer();
       this.armActivationWatcher();
-      this.scheduleInitialization(this.config.stabilityQuietMs, 'native-edit-recovery');
+      this.queueNativeEditRecoveryAttempt();
       return;
     }
 
@@ -156,6 +202,20 @@ export class SessionController {
 
     this.armActivationWatcher();
     this.scheduleInitialization(INITIAL_ACTIVATION_QUIET_MS, 'session-init');
+  }
+
+  private async handleObservedSessionChange(): Promise<void> {
+    const currentSessionId = this.currentSessionState?.sessionId;
+    const nextSessionId = this.adapter.getSessionId();
+
+    if (currentSessionId && currentSessionId !== nextSessionId) {
+      this.releaseMountedThreadToHost();
+      this.resetSessionState();
+      this.armActivationWatcher();
+      await this.publishStats();
+    }
+
+    await this.ensureSessionStarted();
   }
 
   private async initializeSession(): Promise<void> {
@@ -200,6 +260,10 @@ export class SessionController {
 
     if (!this.activationObserver) {
       this.activationObserver = new MutationObserver(() => {
+        if (this.isApplyingDomChanges) {
+          return;
+        }
+
         this.queueActivationCheck();
       });
       this.activationObserver.observe(document.body, {
@@ -219,6 +283,11 @@ export class SessionController {
     this.clearInitializationTimer();
     this.clearPhaseSettleTimer();
     this.clearReindexTimer();
+    this.healthObserver?.disconnect();
+    this.healthObserver = undefined;
+    this.healthCheckQueued = false;
+    this.nativeEditRecoveryQueued = false;
+    this.awaitingNativeEditTransition = false;
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
     this.scrollManager?.disconnect();
@@ -236,8 +305,19 @@ export class SessionController {
     this.records = [];
     this.scrollContainer = null;
     this.nativeEditActive = false;
+    this.nativeEditAnchorRecordIndex = null;
+    this.nativeEditComposerSeen = false;
     this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
+  }
+
+  private releaseMountedThreadToHost(): void {
+    if (!this.virtualizer) {
+      return;
+    }
+
+    this.virtualizer.suspendForNativeEdit();
+    this.records = this.virtualizer.getRecords();
   }
 
   private queueActivationCheck(): void {
@@ -249,6 +329,22 @@ export class SessionController {
     queueMicrotask(() => {
       this.activationCheckQueued = false;
       void this.ensureSessionStarted();
+    });
+  }
+
+  private queueNativeEditRecoveryAttempt(): void {
+    if (this.nativeEditRecoveryQueued) {
+      return;
+    }
+
+    this.nativeEditRecoveryQueued = true;
+    queueMicrotask(() => {
+      this.nativeEditRecoveryQueued = false;
+      if (!this.suspendedForNativeEdit) {
+        return;
+      }
+
+      void this.recoverFromNativeEdit();
     });
   }
 
@@ -326,6 +422,37 @@ export class SessionController {
     });
   }
 
+  private observeHostHealth(): void {
+    this.healthObserver?.disconnect();
+    this.healthObserver = undefined;
+    this.healthCheckQueued = false;
+
+    if (!document.body) {
+      return;
+    }
+
+    this.healthObserver = new MutationObserver(() => {
+      if (this.isApplyingDomChanges) {
+        return;
+      }
+
+      if (this.healthCheckQueued) {
+        return;
+      }
+
+      this.healthCheckQueued = true;
+      queueMicrotask(() => {
+        this.healthCheckQueued = false;
+        void this.checkHostDomHealth();
+      });
+    });
+
+    this.healthObserver.observe(document.body, {
+      childList: true,
+      subtree: true
+    });
+  }
+
   private async restorePreviousBatch(): Promise<void> {
     if (!this.currentSessionState || !this.scrollContainer || !this.virtualizer) {
       return;
@@ -376,6 +503,51 @@ export class SessionController {
     await this.applySessionRecords(sessionId, scrollContainer, mergedRecords, this.currentSessionState.windowMode, this.currentSessionState.phase);
   }
 
+  private async checkHostDomHealth(): Promise<void> {
+    if (this.nativeEditActive || this.suspendedForNativeEdit) {
+      if (this.suspendedForNativeEdit) {
+        this.queueActivationCheck();
+      }
+      return;
+    }
+
+    if (!this.currentSessionState) {
+      return;
+    }
+
+    if (this.currentSessionState.sessionId !== this.adapter.getSessionId()) {
+      this.releaseMountedThreadToHost();
+      this.resetSessionState();
+      this.armActivationWatcher();
+      await this.publishStats();
+      await this.ensureSessionStarted();
+      return;
+    }
+
+    const mountedRecords = this.records.filter((record) => record.mounted);
+    if (mountedRecords.length === 0) {
+      return;
+    }
+
+    const allMountedRootsLost = mountedRecords.every((record) => !record.rootElement?.isConnected);
+    const scrollContainerLost = Boolean(this.scrollContainer && !this.scrollContainer.isConnected);
+
+    if (!allMountedRootsLost && !scrollContainerLost) {
+      return;
+    }
+
+    const nextScrollContainer = this.adapter.getScrollContainer();
+    const nextTurns = this.adapter.collectTurnCandidates();
+
+    if (nextScrollContainer && nextTurns.length > 0) {
+      await this.initializeSession();
+      return;
+    }
+
+    this.suspendForThreadRecovery();
+    await this.publishStats();
+  }
+
   private hasMountedDomLoss(): boolean {
     const mountedRecords = this.records.filter((record) => record.mounted);
     if (mountedRecords.length === 0) {
@@ -391,6 +563,7 @@ export class SessionController {
     }
 
     this.nativeEditActive = false;
+    this.nativeEditComposerSeen = false;
     this.suspendedForNativeEdit = true;
     this.clearInitializationTimer();
     this.clearReindexTimer();
@@ -411,6 +584,7 @@ export class SessionController {
     }
 
     if (this.virtualizer) {
+      this.virtualizer.primeMountedSnapshots();
       this.virtualizer.suspendForNativeEdit();
       this.records = this.virtualizer.getRecords();
       this.syncSessionState();
@@ -430,6 +604,7 @@ export class SessionController {
     const sessionId = this.adapter.getSessionId();
     const scrollContainer = this.adapter.getScrollContainer();
     if (!scrollContainer) {
+      this.logger.debug('Deferred native edit recovery because scroll container is unavailable.');
       this.armActivationWatcher();
       await this.publishStats();
       return;
@@ -437,19 +612,36 @@ export class SessionController {
 
     const partialTurns = this.adapter.collectTurnCandidates();
     if (partialTurns.length === 0) {
+      this.logger.debug('Deferred native edit recovery because no turn candidates are visible.');
       this.armActivationWatcher();
       await this.publishStats();
       return;
     }
 
     const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
+    this.logger.warn('native-edit recovery attempt', {
+      partialRecordCount: partialRecords.length,
+      partialRecordTexts: partialRecords.map((record) => record.textUser).slice(0, 8),
+      preservedRecordCount: (this.nativeEditRecoveryRecords ?? this.records).length,
+      preservedTailTexts: (this.nativeEditRecoveryRecords ?? this.records).map((record) => record.textUser).slice(-8),
+      sessionId
+    });
     const recoveredRecords = this.recoverNativeEditRecords(sessionId, partialRecords);
     if (!recoveredRecords) {
+      this.logger.debug('Deferred native edit recovery because the visible slice is not safely recoverable yet.', {
+        partialRecordCount: partialRecords.length,
+        preservedRecordCount: this.nativeEditRecoveryRecords?.length ?? this.records.length,
+        sessionId
+      });
       this.armActivationWatcher();
       await this.publishStats();
       return;
     }
 
+    this.logger.debug('Recovered virtualization after native edit.', {
+      partialRecordCount: partialRecords.length,
+      sessionId
+    });
     const windowMode = this.currentSessionState?.windowMode ?? 'auto';
     const phase = this.currentSessionState?.phase ?? 'steady';
     await this.applySessionRecords(sessionId, scrollContainer, recoveredRecords, windowMode, phase);
@@ -476,6 +668,7 @@ export class SessionController {
     windowMode: SessionState['windowMode'],
     phase: SessionState['phase']
   ): Promise<void> {
+    this.disarmActivationWatcher();
     this.scrollContainer = scrollContainer;
     this.records = records;
     this.cleanupEditModeListener?.();
@@ -513,6 +706,7 @@ export class SessionController {
     this.nativeEditActive = false;
     this.nativeEditRecoveryRecords = null;
     this.suspendedForNativeEdit = false;
+    this.awaitingNativeEditTransition = false;
     this.syncSessionState();
     if (phase === 'bootstrapping') {
       if (this.phaseSettleTimer === undefined) {
@@ -532,6 +726,7 @@ export class SessionController {
     this.installQuickJumpListener();
     this.installEditModeListener();
     this.observeMutations();
+    this.observeHostHealth();
     await this.publishStats();
   }
 
@@ -557,8 +752,8 @@ export class SessionController {
         id: existing.id,
         index: existing.index,
         sessionId,
-        mounted: existing.mounted,
-        renderMode: existing.renderMode,
+        mounted: partial.mounted,
+        renderMode: partial.mounted ? 'live' : existing.renderMode,
         protectedUntil: existing.protectedUntil,
         rootElement: null,
         detachedRoot: existing.detachedRoot,
@@ -590,17 +785,44 @@ export class SessionController {
       return partialRecords;
     }
 
-    const recoveryRangeStart = findContiguousRecoveryRange(preservedRecords, partialRecords);
-    if (recoveryRangeStart >= 0) {
-      return mergeRecoveredRecordRange(sessionId, preservedRecords, partialRecords, recoveryRangeStart);
+    const minimumRecoverableCount = Math.min(this.config.windowSizeQa, preservedRecords.length);
+    const recoveryRangeStarts = findContiguousRecoveryRanges(preservedRecords, partialRecords);
+    const recoveryRangeStart = recoveryRangeStarts[0];
+    if (recoveryRangeStarts.length === 1 && recoveryRangeStart !== undefined) {
+      const isTailSlice = recoveryRangeStart + partialRecords.length === preservedRecords.length;
+      const canRecoverFromTailSlice = isTailSlice && partialRecords.length >= Math.min(MIN_TAIL_RECOVERY_RECORDS, preservedRecords.length);
+      const mergedRecords = mergeRecoveredRecordRange(sessionId, preservedRecords, partialRecords, recoveryRangeStart);
+
+      if ((partialRecords.length >= minimumRecoverableCount || canRecoverFromTailSlice) && this.canRecoverWindowPlan(mergedRecords)) {
+        return mergedRecords;
+      }
     }
 
-    const fullyRecoveredThreshold = Math.max(this.config.windowSizeQa, preservedRecords.length - 1);
+    const fullyRecoveredThreshold = Math.max(minimumRecoverableCount, preservedRecords.length - 1);
     if (partialRecords.length >= fullyRecoveredThreshold) {
       return partialRecords;
     }
 
     return null;
+  }
+
+  private canRecoverWindowPlan(records: QARecord[]): boolean {
+    const plan = computeWindowPlan(records, this.config, Date.now());
+
+    return plan.mountRecordIds.every((recordId) => {
+      const record = records.find((candidate) => candidate.id === recordId);
+      if (!record) {
+        return false;
+      }
+
+      return (
+        record.mounted ||
+        record.rootElement?.isConnected === true ||
+        record.detachedRoot !== undefined && record.detachedRoot !== null ||
+        record.liveRootCache !== undefined && record.liveRootCache !== null ||
+        Boolean(record.snapshotHtml)
+      );
+    });
   }
 
   private installScrollModeListener(scrollContainer: HTMLElement): void {
@@ -672,7 +894,7 @@ export class SessionController {
         return;
       }
 
-      this.enterNativeEditMode();
+      this.enterNativeEditMode(this.findRecordIndexForTarget(event.target));
     };
 
     document.addEventListener('click', onClick, true);
@@ -777,13 +999,16 @@ export class SessionController {
     this.currentSessionState.windowMode = windowMode;
   }
 
-  private enterNativeEditMode(): void {
+  private enterNativeEditMode(anchorRecordIndex: number | null = this.nativeEditAnchorRecordIndex): void {
     if (this.suspendedForNativeEdit) {
       return;
     }
 
     this.nativeEditActive = true;
+    this.nativeEditAnchorRecordIndex = anchorRecordIndex;
+    this.nativeEditComposerSeen = false;
     this.suspendedForNativeEdit = true;
+    this.awaitingNativeEditTransition = true;
     this.clearInitializationTimer();
     this.clearReindexTimer();
     this.clearPhaseSettleTimer();
@@ -798,6 +1023,7 @@ export class SessionController {
     this.cleanupScrollModeListener?.();
     this.cleanupScrollModeListener = undefined;
     if (this.virtualizer) {
+      this.virtualizer.primeMountedSnapshots();
       this.virtualizer.suspendForNativeEdit();
       this.records = this.virtualizer.getRecords();
       this.nativeEditRecoveryRecords = this.records.map((record) => cloneRecoveryRecord(record));
@@ -807,6 +1033,25 @@ export class SessionController {
     }
     this.armActivationWatcher();
     void this.publishStats();
+  }
+
+  private findRecordIndexForTarget(target: EventTarget | null): number | null {
+    if (!(target instanceof HTMLElement)) {
+      return null;
+    }
+
+    const wrapper = target.closest<HTMLElement>('.ecv-record-root[data-record-index]');
+    if (!wrapper) {
+      return null;
+    }
+
+    const rawIndex = wrapper.dataset.recordIndex;
+    if (!rawIndex) {
+      return null;
+    }
+
+    const parsed = Number(rawIndex);
+    return Number.isInteger(parsed) ? parsed : null;
   }
 
   private armSteadyPhaseTimer(): void {
@@ -949,29 +1194,31 @@ function findSuffixPrefixOverlap(existingRecords: QARecord[], partialRecords: QA
   return -1;
 }
 
-function findContiguousRecoveryRange(existingRecords: QARecord[], partialRecords: QARecord[]): number {
+function findContiguousRecoveryRanges(existingRecords: QARecord[], partialRecords: QARecord[]): number[] {
   if (partialRecords.length === 0 || partialRecords.length > existingRecords.length) {
-    return -1;
+    return [];
   }
 
   const lastStartIndex = existingRecords.length - partialRecords.length;
+  const startIndices: number[] = [];
+
   for (let startIndex = 0; startIndex <= lastStartIndex; startIndex += 1) {
-    let matches = true;
+    let isMatch = true;
     for (let offset = 0; offset < partialRecords.length; offset += 1) {
       const left = existingRecords[startIndex + offset];
       const right = partialRecords[offset];
       if (!left || !right || !recordsAreCompatible(left, right)) {
-        matches = false;
+        isMatch = false;
         break;
       }
     }
 
-    if (matches) {
-      return startIndex;
+    if (isMatch) {
+      startIndices.push(startIndex);
     }
   }
 
-  return -1;
+  return startIndices;
 }
 
 function mergeRecoveredRecordRange(sessionId: string, preservedRecords: QARecord[], partialRecords: QARecord[], startIndex: number): QARecord[] {
@@ -989,8 +1236,8 @@ function mergeRecoveredRecordRange(sessionId: string, preservedRecords: QARecord
       id: preserved.id,
       index: preserved.index,
       sessionId,
-      mounted: preserved.mounted,
-      renderMode: preserved.renderMode,
+      mounted: partial.mounted,
+      renderMode: partial.mounted ? 'live' : preserved.renderMode,
       protectedUntil: preserved.protectedUntil,
       rootElement: null,
       detachedRoot: preserved.detachedRoot,
