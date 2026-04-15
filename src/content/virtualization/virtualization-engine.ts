@@ -215,10 +215,6 @@ export class VirtualizationEngine {
       this.detachedRootReleaseTimer = undefined;
     }
 
-    for (const group of this.collapsedGroups) {
-      group.element.remove();
-    }
-    this.collapsedGroups = [];
     this.forcedLiveRecordIds.clear();
     this.preferredLiveOrder = [];
     this.cleanupInteractionListeners?.();
@@ -230,6 +226,7 @@ export class VirtualizationEngine {
       }
 
       this.ensureLiveRecord(record);
+      this.ensureMountedRecordConnectedForNativeEdit(record);
       const wrapper = record.rootElement;
       if (!wrapper) {
         record.rootElement = null;
@@ -287,6 +284,74 @@ export class VirtualizationEngine {
 
   private findRecord(recordId: string): QARecord | undefined {
     return this.records.find((record) => record.id === recordId);
+  }
+
+  private ensureMountedRecordConnectedForNativeEdit(record: QARecord): boolean {
+    if (!record.mounted) {
+      return false;
+    }
+
+    this.ensureLiveRecord(record);
+    if (record.rootElement?.isConnected) {
+      return true;
+    }
+
+    const sourceRoot = record.liveRootCache ?? record.rootElement ?? record.detachedRoot ?? null;
+    if (sourceRoot) {
+      const reference = this.findNextDomSibling(record.index);
+      if (reference) {
+        reference.before(sourceRoot);
+      } else {
+        this.getThreadRoot()?.append(sourceRoot);
+      }
+
+      record.detachedRoot = null;
+      record.liveRootCache = null;
+      this.detachedRootExpiry.delete(record.id);
+      record.rootElement = sourceRoot;
+      record.mounted = true;
+      record.renderMode = 'live';
+      record.elements = Array.from(sourceRoot.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+      this.applyRenderMetadata(record);
+      return true;
+    }
+
+    const snapshot =
+      this.snapshotCache.get(record.id) ??
+      (record.snapshotHtml
+        ? {
+            anchorSignature: record.anchorSignature ?? record.textCombined.slice(0, 80),
+            createdAt: 0,
+            height: record.height,
+            html: record.snapshotHtml,
+            recordId: record.id,
+            sessionId: record.sessionId,
+            textCombined: record.textCombined,
+            updatedAt: 0
+          }
+        : undefined);
+
+    if (!snapshot) {
+      return false;
+    }
+
+    const wrapper = this.createRootFromHtml(record, snapshot.html);
+    const reference = this.findNextDomSibling(record.index);
+    if (reference) {
+      reference.before(wrapper);
+    } else {
+      this.getThreadRoot()?.append(wrapper);
+    }
+
+    record.rootElement = wrapper;
+    record.liveRootCache = null;
+    record.snapshotHtml = snapshot.html;
+    record.mounted = true;
+    record.renderMode = 'live';
+    record.height = snapshot.height;
+    record.elements = Array.from(wrapper.children).filter((element): element is HTMLElement => element instanceof HTMLElement);
+    this.applyRenderMetadata(record);
+    return true;
   }
 
   private findCollapsedGroupForRecord(recordId: string): CollapsedGroupRange | undefined {

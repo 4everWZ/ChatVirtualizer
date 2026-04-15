@@ -31,7 +31,6 @@ export class SessionController {
   private mutationObserver?: MutationObserver;
   private activationObserver?: MutationObserver;
   private activationCheckQueued = false;
-  private nativeEditRecoveryQueued = false;
   private awaitingNativeEditTransition = false;
   private healthObserver?: MutationObserver;
   private healthCheckQueued = false;
@@ -83,7 +82,6 @@ export class SessionController {
     this.activationObserver?.disconnect();
     this.activationObserver = undefined;
     this.activationCheckQueued = false;
-    this.nativeEditRecoveryQueued = false;
     this.awaitingNativeEditTransition = false;
     this.healthObserver?.disconnect();
     this.healthObserver = undefined;
@@ -134,14 +132,6 @@ export class SessionController {
     }
 
     if (this.suspendedForNativeEdit) {
-      this.logger.warn('native-edit gate', {
-        awaitingNativeEditTransition: this.awaitingNativeEditTransition,
-        canHandlePage: this.adapter.canHandlePage(),
-        nativeEditComposerSeen: this.nativeEditComposerSeen,
-        nativeEditDetected,
-        preservedRecordCount: this.nativeEditRecoveryRecords?.length ?? this.records.length,
-        sessionId: this.adapter.getSessionId()
-      });
       if (nativeEditDetected) {
         this.nativeEditActive = true;
         this.nativeEditComposerSeen = true;
@@ -181,9 +171,8 @@ export class SessionController {
         return;
       }
 
-      this.clearInitializationTimer();
       this.armActivationWatcher();
-      this.queueNativeEditRecoveryAttempt();
+      this.scheduleInitialization(this.config.stabilityQuietMs, 'native-edit-recovery');
       return;
     }
 
@@ -286,7 +275,6 @@ export class SessionController {
     this.healthObserver?.disconnect();
     this.healthObserver = undefined;
     this.healthCheckQueued = false;
-    this.nativeEditRecoveryQueued = false;
     this.awaitingNativeEditTransition = false;
     this.mutationObserver?.disconnect();
     this.mutationObserver = undefined;
@@ -332,22 +320,6 @@ export class SessionController {
     });
   }
 
-  private queueNativeEditRecoveryAttempt(): void {
-    if (this.nativeEditRecoveryQueued) {
-      return;
-    }
-
-    this.nativeEditRecoveryQueued = true;
-    queueMicrotask(() => {
-      this.nativeEditRecoveryQueued = false;
-      if (!this.suspendedForNativeEdit) {
-        return;
-      }
-
-      void this.recoverFromNativeEdit();
-    });
-  }
-
   private scheduleInitialization(quietMs: number, mode: InitializationMode): void {
     this.clearInitializationTimer();
     this.initializationMode = mode;
@@ -389,6 +361,11 @@ export class SessionController {
 
     this.mutationObserver = new MutationObserver((mutations) => {
       if (this.isApplyingDomChanges) {
+        return;
+      }
+
+      if (!this.suspendedForNativeEdit && this.adapter.isNativeEditActive?.()) {
+        this.enterNativeEditMode();
         return;
       }
 
@@ -504,6 +481,11 @@ export class SessionController {
   }
 
   private async checkHostDomHealth(): Promise<void> {
+    if (!this.suspendedForNativeEdit && this.adapter.isNativeEditActive?.()) {
+      this.enterNativeEditMode();
+      return;
+    }
+
     if (this.nativeEditActive || this.suspendedForNativeEdit) {
       if (this.suspendedForNativeEdit) {
         this.queueActivationCheck();
@@ -619,13 +601,6 @@ export class SessionController {
     }
 
     const partialRecords = buildQaRecordsFromTurns(partialTurns, sessionId);
-    this.logger.warn('native-edit recovery attempt', {
-      partialRecordCount: partialRecords.length,
-      partialRecordTexts: partialRecords.map((record) => record.textUser).slice(0, 8),
-      preservedRecordCount: (this.nativeEditRecoveryRecords ?? this.records).length,
-      preservedTailTexts: (this.nativeEditRecoveryRecords ?? this.records).map((record) => record.textUser).slice(-8),
-      sessionId
-    });
     const recoveredRecords = this.recoverNativeEditRecords(sessionId, partialRecords);
     if (!recoveredRecords) {
       this.logger.debug('Deferred native edit recovery because the visible slice is not safely recoverable yet.', {
@@ -786,19 +761,39 @@ export class SessionController {
     }
 
     const minimumRecoverableCount = Math.min(this.config.windowSizeQa, preservedRecords.length);
+    const fullyRecoveredThreshold = Math.max(minimumRecoverableCount, preservedRecords.length - 1);
+    const anchorIndex = this.resolveNativeEditAnchorIndex(preservedRecords);
     const recoveryRangeStarts = findContiguousRecoveryRanges(preservedRecords, partialRecords);
     const recoveryRangeStart = recoveryRangeStarts[0];
     if (recoveryRangeStarts.length === 1 && recoveryRangeStart !== undefined) {
-      const isTailSlice = recoveryRangeStart + partialRecords.length === preservedRecords.length;
-      const canRecoverFromTailSlice = isTailSlice && partialRecords.length >= Math.min(MIN_TAIL_RECOVERY_RECORDS, preservedRecords.length);
+      const recoveryRangeIncludesAnchor =
+        anchorIndex !== null &&
+        anchorIndex >= recoveryRangeStart &&
+        anchorIndex < recoveryRangeStart + partialRecords.length;
       const mergedRecords = mergeRecoveredRecordRange(sessionId, preservedRecords, partialRecords, recoveryRangeStart);
 
-      if ((partialRecords.length >= minimumRecoverableCount || canRecoverFromTailSlice) && this.canRecoverWindowPlan(mergedRecords)) {
+      const canRecoverContiguousRange =
+        partialRecords.length >= fullyRecoveredThreshold ||
+        partialRecords.length >= minimumRecoverableCount && recoveryRangeIncludesAnchor;
+
+      if (canRecoverContiguousRange && this.canRecoverWindowPlan(mergedRecords)) {
         return mergedRecords;
       }
     }
 
-    const fullyRecoveredThreshold = Math.max(minimumRecoverableCount, preservedRecords.length - 1);
+    const anchorGuidedStart = findAnchorGuidedRecoveryRange(preservedRecords, partialRecords, anchorIndex);
+    if (anchorGuidedStart !== null) {
+      const mergedRecords = mergeRecoveredRecordRange(sessionId, preservedRecords, partialRecords, anchorGuidedStart);
+      if (this.canRecoverWindowPlan(mergedRecords)) {
+        return mergedRecords;
+      }
+    }
+
+    const anchorRebuiltRecords = this.rebuildRecordsFromNativeEditAnchor(sessionId, preservedRecords, partialRecords, anchorIndex);
+    if (anchorRebuiltRecords && this.canRecoverWindowPlan(anchorRebuiltRecords)) {
+      return anchorRebuiltRecords;
+    }
+
     if (partialRecords.length >= fullyRecoveredThreshold) {
       return partialRecords;
     }
@@ -823,6 +818,86 @@ export class SessionController {
         Boolean(record.snapshotHtml)
       );
     });
+  }
+
+  private rebuildRecordsFromNativeEditAnchor(
+    sessionId: string,
+    preservedRecords: QARecord[],
+    partialRecords: QARecord[],
+    anchorIndex: number | null
+  ): QARecord[] | null {
+    if (anchorIndex === null || partialRecords.length < MIN_TAIL_RECOVERY_RECORDS) {
+      return null;
+    }
+
+    for (let startIndex = 0; startIndex <= anchorIndex; startIndex += 1) {
+      const anchorOffset = anchorIndex - startIndex;
+      if (anchorOffset <= 0 || anchorOffset >= partialRecords.length) {
+        continue;
+      }
+
+      let prefixMatches = true;
+      for (let offset = 0; offset < anchorOffset; offset += 1) {
+        const preserved = preservedRecords[startIndex + offset];
+        const partial = partialRecords[offset];
+        if (!preserved || !partial || !recordsAreCompatible(preserved, partial)) {
+          prefixMatches = false;
+          break;
+        }
+      }
+
+      if (!prefixMatches) {
+        continue;
+      }
+
+      const rebuilt = preservedRecords.slice(0, anchorIndex).map((record) => cloneRecoveryRecord(record));
+
+      for (let offset = anchorOffset; offset < partialRecords.length; offset += 1) {
+        const partial = partialRecords[offset];
+        if (!partial) {
+          continue;
+        }
+
+        const recordIndex = rebuilt.length;
+        rebuilt.push({
+          ...partial,
+          id: createRecordId(sessionId, recordIndex),
+          index: recordIndex,
+          sessionId,
+          protectedUntil: undefined,
+          rootElement: null,
+          detachedRoot: undefined,
+          liveRootCache: undefined,
+          snapshotHtml: undefined
+        });
+      }
+
+      return rebuilt;
+    }
+
+    return null;
+  }
+
+  private resolveNativeEditAnchorIndex(records: QARecord[] = this.nativeEditRecoveryRecords ?? this.records): number | null {
+    if (this.nativeEditAnchorRecordIndex !== null) {
+      return this.nativeEditAnchorRecordIndex;
+    }
+
+    const draftText = normalizeQuickJumpRecordText(this.adapter.getNativeEditDraftText?.() ?? '');
+    if (!draftText) {
+      return null;
+    }
+
+    const exactMatches = records
+      .map((record, index) => ({ index, text: normalizeQuickJumpRecordText(record.textUser) }))
+      .filter((candidate) => candidate.text === draftText);
+
+    if (exactMatches.length !== 1) {
+      return null;
+    }
+
+    this.nativeEditAnchorRecordIndex = exactMatches[0]?.index ?? null;
+    return this.nativeEditAnchorRecordIndex;
   }
 
   private installScrollModeListener(scrollContainer: HTMLElement): void {
@@ -890,11 +965,12 @@ export class SessionController {
     }
 
     const onClick = (event: Event) => {
-      if (!this.adapter.isEditMessageTrigger?.(event.target)) {
+      const targetElement = resolveEventElement(event);
+      if (!this.adapter.isEditMessageTrigger?.(targetElement)) {
         return;
       }
 
-      this.enterNativeEditMode(this.findRecordIndexForTarget(event.target));
+      this.enterNativeEditMode(this.findRecordIndexForTarget(targetElement));
     };
 
     document.addEventListener('click', onClick, true);
@@ -1006,6 +1082,7 @@ export class SessionController {
 
     this.nativeEditActive = true;
     this.nativeEditAnchorRecordIndex = anchorRecordIndex;
+    this.resolveNativeEditAnchorIndex();
     this.nativeEditComposerSeen = false;
     this.suspendedForNativeEdit = true;
     this.awaitingNativeEditTransition = true;
@@ -1036,7 +1113,7 @@ export class SessionController {
   }
 
   private findRecordIndexForTarget(target: EventTarget | null): number | null {
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return null;
     }
 
@@ -1171,6 +1248,17 @@ function cloneRecoveryRecord(record: QARecord): QARecord {
   };
 }
 
+function resolveEventElement(event: Event): Element | null {
+  const composedPath = typeof event.composedPath === 'function' ? event.composedPath() : [];
+  for (const candidate of composedPath) {
+    if (candidate instanceof Element) {
+      return candidate;
+    }
+  }
+
+  return event.target instanceof Element ? event.target : null;
+}
+
 function findSuffixPrefixOverlap(existingRecords: QARecord[], partialRecords: QARecord[]): number {
   const maxOverlap = Math.min(existingRecords.length, partialRecords.length);
 
@@ -1247,6 +1335,65 @@ function mergeRecoveredRecordRange(sessionId: string, preservedRecords: QARecord
   }
 
   return merged;
+}
+
+function findAnchorGuidedRecoveryRange(
+  preservedRecords: QARecord[],
+  partialRecords: QARecord[],
+  anchorIndex: number | null
+): number | null {
+  if (anchorIndex === null || partialRecords.length === 0 || partialRecords.length > preservedRecords.length) {
+    return null;
+  }
+
+  const minStart = Math.max(0, anchorIndex - partialRecords.length + 1);
+  const maxStart = Math.min(anchorIndex, preservedRecords.length - partialRecords.length);
+  let bestStart: number | null = null;
+  let bestScore = -1;
+
+  for (let startIndex = minStart; startIndex <= maxStart; startIndex += 1) {
+    const anchorOffset = anchorIndex - startIndex;
+    const trailingCount = partialRecords.length - anchorOffset - 1;
+    let matchesBefore = 0;
+    let matchesAfter = 0;
+    let mismatchesAfter = 0;
+
+    for (let offset = 0; offset < partialRecords.length; offset += 1) {
+      const left = preservedRecords[startIndex + offset];
+      const right = partialRecords[offset];
+      if (!left || !right || !recordsAreCompatible(left, right)) {
+        if (offset > anchorOffset) {
+          mismatchesAfter += 1;
+        }
+        continue;
+      }
+
+      if (offset < anchorOffset) {
+        matchesBefore += 1;
+      } else if (offset > anchorOffset) {
+        matchesAfter += 1;
+      }
+    }
+
+    const beforeCount = anchorOffset;
+    const allBeforeMatched = beforeCount === matchesBefore;
+    const allAfterMatched = trailingCount === matchesAfter;
+    const canUseRange =
+      (trailingCount > 0 && allAfterMatched) ||
+      (trailingCount === 0 && beforeCount > 0 && allBeforeMatched);
+
+    if (!canUseRange || mismatchesAfter > 0) {
+      continue;
+    }
+
+    const score = matchesBefore + matchesAfter;
+    if (score > bestScore) {
+      bestScore = score;
+      bestStart = startIndex;
+    }
+  }
+
+  return bestStart;
 }
 
 function normalizeQuickJumpRecordText(value: string): string {

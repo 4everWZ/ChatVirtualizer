@@ -50,6 +50,46 @@ const DEFAULT_CONFIG = {
 };
 ```
 
+## Options Reference
+
+- `Window size`
+  Number of QA records the extension tries to keep visible in the normal auto window. With the default `10`, older records are collapsed once the thread grows past 10 stable QA pairs.
+- `Load batch`
+  How many older QA records to restore each time you hit the top-restore path. Higher values pull history back faster, but they also grow the mounted DOM faster.
+- `Top threshold px`
+  How close the chat scroller must be to the very top before the extension treats it as an intentional “load older history” action. This is now a hard gate for both the scroll listener and the top sentinel observer; intersecting the sentinel alone is no longer enough to restore history early.
+- `Preload buffer px`
+  Bottom-zone threshold used to switch back from manual-expanded mode to auto mode. When you scroll back within this many pixels of the bottom, the extension is allowed to recompress older history again.
+- `Context before`
+  When native browser find or site quick-jump restores a collapsed target, this many QA records before the target are also restored for context.
+- `Context after`
+  Same as `Context before`, but for records after the target.
+- `Max cached sessions`
+  Maximum number of sessions whose IndexedDB snapshots are retained locally. Older session caches are pruned with an LRU policy.
+- `Stability quiet ms`
+  Debounce window used before steady-state reindex or recovery work runs. Larger values wait longer for ChatGPT DOM churn to settle; smaller values react faster but increase the chance of acting during host-side rebuilds.
+- `Protect generating records`
+  Keeps actively generating assistant records mounted even if that temporarily pushes the mounted count above `Window size`.
+- `Enable virtualization`
+  Master switch for collapsing old history. When disabled, the extension still detects the session, but it stops collapsing and restoring records.
+- `Enable debug logging`
+  Turns on verbose `[ECV]` console logs for live debugging. Leave it off in normal use because it is only for diagnosis.
+
+## Tuning Guidance
+
+- If you want lower memory and less visible DOM, reduce `Window size`.
+- If top-scroll restore feels too slow, increase `Load batch`.
+- If auto recompression happens too eagerly after you inspect old history, increase `Preload buffer px`.
+- If ChatGPT is still rebuilding when the extension reacts, increase `Stability quiet ms`.
+- If you want more context around native-find hits or quick-jump targets, raise `Context before` and `Context after`.
+
+## Runtime Resource Discipline
+
+- Runtime behavior is event-driven. The extension uses DOM events, `MutationObserver`, `IntersectionObserver`, and bounded one-shot timers for debounce or delayed cleanup.
+- Polling loops are intentionally disallowed. There is no runtime `setInterval` polling and no `requestAnimationFrame` spin loop in `src/`.
+- Detached DOM kept for fast same-session restore is released on a bounded timer and falls back to lightweight snapshots, so old full DOM trees are not retained indefinitely.
+- If a future change needs to add recurring work, it should be treated as a design problem first, not as an implementation convenience.
+
 ## Getting Started
 
 ### Requirements

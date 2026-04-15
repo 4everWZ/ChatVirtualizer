@@ -152,7 +152,7 @@ export class ChatGptPageAdapter implements PageAdapter {
   }
 
   extractQuickJumpText(target: EventTarget | null): string | null {
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return null;
     }
 
@@ -161,11 +161,17 @@ export class ChatGptPageAdapter implements PageAdapter {
   }
 
   isEditMessageTrigger(target: EventTarget | null): boolean {
-    return target instanceof HTMLElement && target.closest(EDIT_MESSAGE_BUTTON_SELECTOR) !== null;
+    return target instanceof Element && target.closest(EDIT_MESSAGE_BUTTON_SELECTOR) !== null;
   }
 
   isNativeEditActive(): boolean {
     return this.rootDocument.querySelector(EDIT_MESSAGE_TEXTAREA_SELECTOR) !== null;
+  }
+
+  getNativeEditDraftText(): string | null {
+    const textarea = this.rootDocument.querySelector<HTMLTextAreaElement>(EDIT_MESSAGE_TEXTAREA_SELECTOR);
+    const value = textarea?.value?.trim();
+    return value ? value : null;
   }
 
   private collectTurnCandidatesInternal(scrollContainer: HTMLElement | null): HTMLElement[] {

@@ -25,7 +25,7 @@ export class ScrollManager {
     if ('IntersectionObserver' in globalThis) {
       this.observer = new IntersectionObserver(
         (entries) => {
-          if (entries.some((entry) => entry.isIntersecting)) {
+          if (entries.some((entry) => entry.isIntersecting) && this.isWithinTopThreshold()) {
             void this.maybeTrigger();
           }
         },
@@ -49,13 +49,17 @@ export class ScrollManager {
       this.armed = true;
     }
 
-    if (this.scrollContainer.scrollTop <= this.options.topThresholdPx) {
+    if (this.isWithinTopThreshold()) {
       void this.maybeTrigger();
     }
   };
 
+  private isWithinTopThreshold(): boolean {
+    return this.scrollContainer.scrollTop <= this.options.topThresholdPx;
+  }
+
   private async maybeTrigger(): Promise<void> {
-    if (!this.armed || this.busy) {
+    if (!this.armed || this.busy || !this.isWithinTopThreshold()) {
       return;
     }
 

@@ -207,7 +207,7 @@ class DynamicChatGptAdapter implements PageAdapter {
   }
 
   extractQuickJumpText(target: EventTarget | null): string | null {
-    if (!(target instanceof HTMLElement)) {
+    if (!(target instanceof Element)) {
       return null;
     }
 
@@ -215,7 +215,7 @@ class DynamicChatGptAdapter implements PageAdapter {
   }
 
   isEditMessageTrigger(target: EventTarget | null): boolean {
-    return target instanceof HTMLElement && target.closest('button[aria-label="Edit message"]') !== null;
+    return target instanceof Element && target.closest('button[aria-label="Edit message"]') !== null;
   }
 
   isNativeEditActive(): boolean {
@@ -308,6 +308,7 @@ class EditableChatGptAdapter implements PageAdapter {
   private readonly thread: HTMLElement;
   private readonly hostNoiseRoot: HTMLElement;
   private readonly records: Array<{ question: string; answer: string }> = [];
+  private activeEditIndex = 0;
   private editActive = false;
 
   constructor(initialQaCount: number) {
@@ -367,11 +368,21 @@ class EditableChatGptAdapter implements PageAdapter {
   }
 
   isEditMessageTrigger(target: EventTarget | null): boolean {
-    return target instanceof HTMLElement && target.closest('button[aria-label="Edit message"]') !== null;
+    return target instanceof Element && target.closest('button[aria-label="Edit message"]') !== null;
   }
 
   isNativeEditActive(): boolean {
     return this.editActive && document.querySelector('textarea[aria-label="Edit message"]') !== null;
+  }
+
+  getNativeEditDraftText(): string | null {
+    const textarea = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit message"]');
+    const value = textarea?.value?.trim();
+    return value ? value : null;
+  }
+
+  getActiveEditIndex(): number {
+    return this.activeEditIndex;
   }
 
   clickFirstEditButton(): void {
@@ -387,8 +398,10 @@ class EditableChatGptAdapter implements PageAdapter {
       })
     );
 
+    this.activeEditIndex = this.resolveRecordIndexForButton(button);
+
     window.setTimeout(() => {
-      if (document.querySelector('.ecv-record-root, .ecv-collapsed-group')) {
+      if (document.querySelector('.ecv-record-root')) {
         this.thread.innerHTML = '<div class="composer-parent flex flex-1 flex-col focus-visible:outline-0"></div>';
         this.editActive = false;
         return;
@@ -398,9 +411,85 @@ class EditableChatGptAdapter implements PageAdapter {
     }, 0);
   }
 
+  clickEditButtonForQuestion(questionText: string): void {
+    const section = Array.from(this.thread.querySelectorAll<HTMLElement>('section[data-turn="user"]')).find((candidate) =>
+      candidate.textContent?.includes(questionText)
+    );
+    const button = section?.querySelector<HTMLButtonElement>('button[aria-label="Edit message"]');
+    if (!button) {
+      throw new Error(`expected an edit button for ${questionText}`);
+    }
+
+    button.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      })
+    );
+
+    this.activeEditIndex = this.resolveRecordIndexForButton(button);
+
+    window.setTimeout(() => {
+      if (document.querySelector('.ecv-record-root')) {
+        this.thread.innerHTML = '<div class="composer-parent flex flex-1 flex-col focus-visible:outline-0"></div>';
+        this.editActive = false;
+        return;
+      }
+
+      this.enterEditMode();
+    }, 0);
+  }
+
+  clickLastVisibleEditButtonWithoutRerender(): void {
+    const buttons = Array.from(this.thread.querySelectorAll<HTMLButtonElement>('button[aria-label="Edit message"]'));
+    const button = buttons.at(-1);
+    if (!button) {
+      throw new Error('expected a visible edit button');
+    }
+
+    button.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      })
+    );
+
+    this.activeEditIndex = this.resolveRecordIndexForButton(button);
+    this.enterPassiveEditMode();
+  }
+
+  clickLastVisibleEditIconWithoutRerender(): void {
+    const buttons = Array.from(this.thread.querySelectorAll<HTMLButtonElement>('button[aria-label="Edit message"]'));
+    const button = buttons.at(-1);
+    const icon = button?.querySelector('svg');
+    if (!button || !icon) {
+      throw new Error('expected a visible edit button icon');
+    }
+
+    icon.dispatchEvent(
+      new MouseEvent('click', {
+        bubbles: true,
+        cancelable: true
+      })
+    );
+
+    this.activeEditIndex = this.resolveRecordIndexForButton(button);
+    this.enterPassiveEditMode();
+  }
+
   finishEditMode(): void {
     this.editActive = false;
     this.renderConversation();
+  }
+
+  finishPassiveEditMode(): void {
+    this.editActive = false;
+    this.thread.querySelector('[data-passive-edit-composer]')?.remove();
+  }
+
+  enterEditModeWithoutClick(questionIndex: number): void {
+    this.activeEditIndex = questionIndex;
+    this.enterEditMode();
   }
 
   finishEditModeWithVisibleSlice(startIndex: number, count: number): void {
@@ -412,14 +501,14 @@ class EditableChatGptAdapter implements PageAdapter {
     this.editActive = false;
     this.thread.innerHTML = '';
     this.thread.append(
-      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', 'Edited Question 1'),
+      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', this.getEditedQuestionText()),
       createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', 'Draft replacement answer')
     );
 
     window.setTimeout(() => {
-      this.records[0] = {
-        question: 'Edited Question 1',
-        answer: 'Replacement Answer 1'
+      this.records[this.activeEditIndex] = {
+        question: this.getEditedQuestionText(),
+        answer: this.getEditedAnswerText()
       };
       this.renderConversation();
     }, delayMs);
@@ -429,14 +518,14 @@ class EditableChatGptAdapter implements PageAdapter {
     this.editActive = false;
     this.thread.innerHTML = '';
     this.thread.append(
-      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', 'Edited Question 1'),
+      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', this.getEditedQuestionText()),
       createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', 'Draft replacement answer')
     );
 
     window.setTimeout(() => {
-      this.records[0] = {
-        question: 'Edited Question 1',
-        answer: 'Replacement Answer 1'
+      this.records[this.activeEditIndex] = {
+        question: this.getEditedQuestionText(),
+        answer: this.getEditedAnswerText()
       };
       this.renderConversationSlice(startIndex, count);
     }, delayMs);
@@ -445,11 +534,31 @@ class EditableChatGptAdapter implements PageAdapter {
   submitEditWithSinglePassRecoverySlice(delayMs: number, startIndex: number, count: number): void {
     window.setTimeout(() => {
       this.editActive = false;
-      this.records[0] = {
-        question: 'Edited Question 1',
-        answer: 'Replacement Answer 1'
+      this.records[this.activeEditIndex] = {
+        question: this.getEditedQuestionText(),
+        answer: this.getEditedAnswerText()
       };
       this.renderConversationSlice(startIndex, count);
+    }, delayMs);
+  }
+
+  submitEditWithBranchRecovery(delayMs: number, startIndex: number, count: number): void {
+    this.editActive = false;
+    this.thread.innerHTML = '';
+    this.thread.append(
+      createTurn('conversation-turn-1', 'turn-1', 'user', 'You said:', this.getEditedQuestionText()),
+      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', 'Draft replacement answer')
+    );
+
+    window.setTimeout(() => {
+      const branchLength = Math.min(count, this.records.length - startIndex);
+      const branchRecords = Array.from({ length: branchLength }, (_, offset) => ({
+        question: offset === 0 ? this.getEditedQuestionText() : `Branch Question ${startIndex + offset + 1}`,
+        answer: offset === 0 ? this.getEditedAnswerText() : `Branch Answer ${startIndex + offset + 1}`
+      }));
+
+      this.records.splice(startIndex, this.records.length - startIndex, ...branchRecords);
+      this.renderConversationSlice(startIndex, branchLength);
     }, delayMs);
   }
 
@@ -474,9 +583,9 @@ class EditableChatGptAdapter implements PageAdapter {
 
   private enterEditMode(): void {
     this.editActive = true;
-    const first = this.records[0];
-    if (!first) {
-      throw new Error('expected a first record');
+    const current = this.records[this.activeEditIndex];
+    if (!current) {
+      throw new Error('expected an editable record');
     }
 
     this.thread.innerHTML = '';
@@ -484,12 +593,59 @@ class EditableChatGptAdapter implements PageAdapter {
     composerParent.className = 'composer-parent flex flex-1 flex-col focus-visible:outline-0';
     const textarea = document.createElement('textarea');
     textarea.setAttribute('aria-label', 'Edit message');
-    textarea.value = first.question;
+    textarea.value = current.question;
     composerParent.append(
       textarea,
-      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', first.answer)
+      createTurn('conversation-turn-2', 'turn-2', 'assistant', 'ChatGPT said:', current.answer)
     );
     this.thread.append(composerParent);
+  }
+
+  private enterPassiveEditMode(): void {
+    this.editActive = true;
+    this.thread.querySelector('[data-passive-edit-composer]')?.remove();
+
+    const current = this.records[this.activeEditIndex];
+    if (!current) {
+      throw new Error('expected an editable record');
+    }
+
+    const composerParent = document.createElement('div');
+    composerParent.dataset.passiveEditComposer = 'true';
+    composerParent.className = 'composer-parent flex flex-1 flex-col focus-visible:outline-0';
+    const textarea = document.createElement('textarea');
+    textarea.setAttribute('aria-label', 'Edit message');
+    textarea.value = current.question;
+
+    const cancel = document.createElement('button');
+    cancel.textContent = 'Cancel';
+    const send = document.createElement('button');
+    send.textContent = 'Send';
+    composerParent.append(textarea, cancel, send);
+    this.thread.append(composerParent);
+  }
+
+  private resolveRecordIndexForButton(button: HTMLButtonElement): number {
+    const turn = button.closest<HTMLElement>('section[data-turn-id]');
+    const turnId = turn?.dataset.turnId;
+    if (!turnId) {
+      return 0;
+    }
+
+    const numericPart = Number(turnId.replace(/^turn-/, ''));
+    if (!Number.isFinite(numericPart)) {
+      return 0;
+    }
+
+    return Math.max(0, Math.floor((numericPart - 1) / 2));
+  }
+
+  private getEditedQuestionText(): string {
+    return `Edited Question ${this.activeEditIndex + 1}`;
+  }
+
+  private getEditedAnswerText(): string {
+    return `Replacement Answer ${this.activeEditIndex + 1}`;
   }
 
   private renderConversation(): void {
@@ -1218,6 +1374,167 @@ describe('session controller', () => {
     }
   });
 
+  test('keeps collapsed history folded and the visible window devirtualized while scrolling during native edit', async () => {
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(23);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-scroll-devirtualize-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(23);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickLastVisibleEditButtonWithoutRerender();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelectorAll('section[data-testid^="conversation-turn-"]')).toHaveLength(20);
+      });
+
+      const scrollRoot = adapter.getScrollContainer();
+      if (!scrollRoot) {
+        throw new Error('expected scroll root');
+      }
+
+      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+      scrollRoot.dispatchEvent(new Event('scroll'));
+      scrollRoot.scrollTop = 0;
+      scrollRoot.dispatchEvent(new Event('scroll'));
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelectorAll('section[data-testid^="conversation-turn-"]')).toHaveLength(20);
+      });
+
+      adapter.finishPassiveEditMode();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('keeps collapsed history folded when native edit starts from an inner edit icon click and stays devirtualized while scrolling', async () => {
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(23);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-scroll-icon-devirtualize-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(23);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.clickLastVisibleEditIconWithoutRerender();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelectorAll('section[data-testid^="conversation-turn-"]')).toHaveLength(20);
+      });
+
+      const scrollRoot = adapter.getScrollContainer();
+      if (!scrollRoot) {
+        throw new Error('expected scroll root');
+      }
+
+      scrollRoot.scrollTop = scrollRoot.scrollHeight;
+      scrollRoot.dispatchEvent(new Event('scroll'));
+      scrollRoot.scrollTop = 0;
+      scrollRoot.dispatchEvent(new Event('scroll'));
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+        expect(document.querySelectorAll('section[data-testid^="conversation-turn-"]')).toHaveLength(20);
+      });
+
+      adapter.finishPassiveEditMode();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
+  test('suspends virtualization when ChatGPT enters native edit without the click trigger being observed', async () => {
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(23);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 10,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-dom-observer-fallback-test')
+    });
+
+    try {
+      await controller.start();
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(23);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+
+      adapter.enterEditModeWithoutClick(22);
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+        expect(document.querySelectorAll('section[data-testid^="conversation-turn-"]').length).toBeGreaterThanOrEqual(20);
+      });
+
+      adapter.finishEditMode();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(false);
+        expect(controller.getStats().mountedCount).toBe(10);
+        expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
+      });
+    } finally {
+      controller.stop();
+    }
+  });
+
   test('waits for post-edit DOM recovery to settle before rebuilding virtualization after edit send', async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '';
@@ -1346,7 +1663,24 @@ describe('session controller', () => {
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
       });
 
-      adapter.clickFirstEditButton();
+      const editedRecord = document.querySelector<HTMLElement>('.ecv-record-root[data-record-index="3"]');
+      if (!editedRecord) {
+        throw new Error('expected an older visible record');
+      }
+
+      editedRecord.dispatchEvent(
+        new PointerEvent('pointerenter', {
+          bubbles: true
+        })
+      );
+
+      await vi.waitFor(() => {
+        const promotedRecord = document.querySelector<HTMLElement>('.ecv-record-root[data-record-index="3"]');
+        expect(promotedRecord?.dataset.renderMode).toBe('live');
+        expect(promotedRecord?.querySelector('button[aria-label="Edit message"]')).not.toBeNull();
+      });
+
+      adapter.clickEditButtonForQuestion('Question 4');
       await vi.advanceTimersByTimeAsync(0);
 
       await vi.waitFor(() => {
@@ -1425,7 +1759,7 @@ describe('session controller', () => {
     }
   });
 
-  test('recovers from native edit when ChatGPT only restores a smaller tail slice after scrolling to the bottom', async () => {
+  test('keeps virtualization suspended when post-edit recovery only restores a tail slice that excludes the edited anchor', async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '';
     const adapter = new EditableChatGptAdapter(13);
@@ -1461,13 +1795,34 @@ describe('session controller', () => {
       adapter.submitEditWithPartialRecovery(600, 6, 7);
       await vi.advanceTimersByTimeAsync(1_100);
 
+      expect(adapter.isNativeEditActive()).toBe(false);
+      expect(controller.getStats().totalRecords).toBe(13);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      const scrollContainer = adapter.getScrollContainer();
+      if (!scrollContainer) {
+        throw new Error('expected scroll container');
+      }
+
+      scrollContainer.scrollTop = scrollContainer.scrollHeight;
+      scrollContainer.dispatchEvent(new Event('scroll'));
+      scrollContainer.scrollTop = 0;
+      scrollContainer.dispatchEvent(new Event('scroll'));
+
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      adapter.restoreFullConversation();
+      await vi.advanceTimersByTimeAsync(1_100);
+
       await vi.waitFor(() => {
-        expect(adapter.isNativeEditActive()).toBe(false);
         expect(controller.getStats().totalRecords).toBe(13);
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
-        expect(document.querySelector('[data-record-id="editable-session:record:12"]')).not.toBeNull();
       });
     } finally {
       controller.stop();
@@ -1475,7 +1830,7 @@ describe('session controller', () => {
     }
   });
 
-  test('recovers when edit mode exits directly into a smaller tail slice without a second mutation batch', async () => {
+  test('keeps virtualization suspended until ChatGPT restores more than a tiny post-edit tail slice', async () => {
     vi.useFakeTimers();
     document.body.innerHTML = '';
     const adapter = new EditableChatGptAdapter(13);
@@ -1500,23 +1855,107 @@ describe('session controller', () => {
         expect(controller.getStats().mountedCount).toBe(10);
       });
 
-      adapter.clickFirstEditButton();
+      adapter.clickEditButtonForQuestion('Question 13');
       await vi.advanceTimersByTimeAsync(0);
 
       await vi.waitFor(() => {
         expect(adapter.isNativeEditActive()).toBe(true);
       });
 
-      adapter.submitEditWithSinglePassRecoverySlice(600, 6, 7);
+      adapter.submitEditWithSinglePassRecoverySlice(600, 9, 4);
       await vi.advanceTimersByTimeAsync(700);
 
+      expect(adapter.isNativeEditActive()).toBe(false);
+      expect(controller.getStats().totalRecords).toBe(13);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      adapter.restoreFullConversation();
+      await vi.advanceTimersByTimeAsync(1_100);
+
       await vi.waitFor(() => {
-        expect(adapter.isNativeEditActive()).toBe(false);
         expect(controller.getStats().totalRecords).toBe(13);
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
         expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(1);
       });
+    } finally {
+      controller.stop();
+      vi.useRealTimers();
+    }
+  });
+
+  test('keeps virtualization suspended when a branched post-edit slice does not include the edited anchor yet', async () => {
+    vi.useFakeTimers();
+    document.body.innerHTML = '';
+    const adapter = new EditableChatGptAdapter(13);
+    const controller = new SessionController({
+      adapter,
+      configStore: new StaticConfigStore({
+        stabilityQuietMs: 1_000,
+        enableVirtualization: true,
+        windowSizeQa: 10
+      }),
+      snapshotStore: new IndexedDbSnapshotStore('ecv-session-controller-edit-branch-recovery-test')
+    });
+
+    try {
+      const startPromise = controller.start();
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(300);
+      await startPromise;
+
+      await vi.waitFor(() => {
+        expect(controller.getStats().totalRecords).toBe(13);
+        expect(controller.getStats().mountedCount).toBe(10);
+      });
+
+      const editedRecord = document.querySelector<HTMLElement>('.ecv-record-root[data-record-index="3"]');
+      if (!editedRecord) {
+        throw new Error('expected an older visible record');
+      }
+
+      editedRecord.dispatchEvent(
+        new PointerEvent('pointerenter', {
+          bubbles: true
+        })
+      );
+
+      await vi.waitFor(() => {
+        const promotedRecord = document.querySelector<HTMLElement>('.ecv-record-root[data-record-index="3"]');
+        expect(promotedRecord?.dataset.renderMode).toBe('live');
+        expect(promotedRecord?.querySelector('button[aria-label="Edit message"]')).not.toBeNull();
+      });
+
+      adapter.clickEditButtonForQuestion('Question 4');
+      await vi.advanceTimersByTimeAsync(0);
+
+      const activeEditIndex = adapter.getActiveEditIndex();
+
+      await vi.waitFor(() => {
+        expect(adapter.isNativeEditActive()).toBe(true);
+        expect(adapter.getNativeEditDraftText()).toBe(`Question ${activeEditIndex + 1}`);
+      });
+
+      adapter.submitEditWithBranchRecovery(600, activeEditIndex, 4);
+      await vi.advanceTimersByTimeAsync(700);
+
+      expect(adapter.isNativeEditActive()).toBe(false);
+      expect(controller.getStats().totalRecords).toBe(13);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      adapter.restoreFullConversation();
+      await vi.advanceTimersByTimeAsync(1_100);
+
+      expect(controller.getStats().totalRecords).toBe(13);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+      expect(document.body.textContent).toContain(`Edited Question ${activeEditIndex + 1}`);
+      expect(document.body.textContent).toContain(`Branch Answer ${activeEditIndex + 4}`);
     } finally {
       controller.stop();
       vi.useRealTimers();
@@ -1560,8 +1999,15 @@ describe('session controller', () => {
 
       await vi.advanceTimersByTimeAsync(1_500);
 
+      expect(adapter.isNativeEditActive()).toBe(false);
+      expect(controller.getStats().totalRecords).toBe(13);
+      expect(controller.getStats().mountedCount).toBe(0);
+      expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(0);
+      expect(document.querySelectorAll('.ecv-collapsed-group')).toHaveLength(0);
+
+      await vi.advanceTimersByTimeAsync(2_500);
+
       await vi.waitFor(() => {
-        expect(adapter.isNativeEditActive()).toBe(false);
         expect(controller.getStats().totalRecords).toBe(13);
         expect(controller.getStats().mountedCount).toBe(10);
         expect(document.querySelectorAll('.ecv-record-root')).toHaveLength(10);
@@ -1795,7 +2241,14 @@ function createEditableUserTurn(testId: string, turnId: string, text: string): H
   const actions = document.createElement('div');
   const button = document.createElement('button');
   button.setAttribute('aria-label', 'Edit message');
-  button.textContent = 'Edit';
+  const icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+  icon.setAttribute('viewBox', '0 0 16 16');
+  const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+  path.setAttribute('d', 'M2 11.5V14h2.5L12 6.5 9.5 4 2 11.5z');
+  icon.append(path);
+  const label = document.createElement('span');
+  label.textContent = 'Edit';
+  button.append(icon, label);
   actions.append(button);
   section.append(actions);
   return section;

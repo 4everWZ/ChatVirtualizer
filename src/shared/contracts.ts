@@ -109,6 +109,7 @@ export interface PageAdapter {
   extractQuickJumpText?(target: EventTarget | null): string | null;
   isEditMessageTrigger?(target: EventTarget | null): boolean;
   isNativeEditActive?(): boolean;
+  getNativeEditDraftText?(): string | null;
 }
 
 export interface SnapshotStore {
